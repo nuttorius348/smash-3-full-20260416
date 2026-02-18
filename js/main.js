@@ -26,9 +26,10 @@
  */
 (function () {
 
-const canvas    = document.getElementById('gameCanvas');
-const menuDiv   = document.getElementById('menu');
-const startBtn  = document.getElementById('startBtn');
+const canvas     = document.getElementById('gameCanvas');
+const menuDiv    = document.getElementById('menu');
+const startBtn   = document.getElementById('startBtn');
+const galleryBtn = document.getElementById('galleryBtn');
 
 // ── Device manager for controller auto-detection ────────────────
 const deviceMgr = new SMASH.DeviceManager();
@@ -119,6 +120,23 @@ function startGame(configs, settings) {
  * Handle exit reasons from Game.js overlay menus.
  * @param {'menu'|'charSelect'} reason
  */
+/**
+ * Show the Ultimate Gallery screen to watch all ultimate videos.
+ */
+function showUltimateGallery() {
+    stopActiveScene();
+    stopScan();
+    menuDiv.style.display = 'none';
+    canvas.style.display  = 'block';
+
+    const scene = new SMASH.UltimateGalleryScene(canvas, () => {
+        activeScene = null;
+        showMenu();
+    });
+    scene.start();
+    activeScene = scene;
+}
+
 function handleGameExit(reason) {
     activeScene = null;
 
@@ -152,6 +170,11 @@ function readMenuSettings() {
 // FIGHT button → character select
 startBtn.addEventListener('click', () => {
     showCharSelect(readMenuSettings());
+});
+
+// GALLERY button → ultimate gallery
+galleryBtn.addEventListener('click', () => {
+    showUltimateGallery();
 });
 
 // Enter from menu
