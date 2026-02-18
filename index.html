@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1280, height=720">
+    <title>SMASH 3</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!--  CANVAS (hidden until game/character select starts)           -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<canvas id="gameCanvas" width="1280" height="720"></canvas>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!--  MAIN MENU OVERLAY                                            -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="menu" class="overlay">
+
+    <h1>SMASH 3</h1>
+
+    <!-- Stage select -->
+    <div class="menu-section">
+        <h2>Stage</h2>
+        <select id="stageSelect">
+            <option value="battlefield">Battlefield</option>
+            <option value="final_destination">Final Destination</option>
+            <option value="wide_arena">Wide Arena</option>
+            <option value="sky_fortress">Sky Fortress (Large)</option>
+            <option value="crystal_caverns">Crystal Caverns (Large)</option>
+            <option value="orbital_station">Orbital Station (Large)</option>
+        </select>
+    </div>
+
+    <!-- Match settings -->
+    <div class="menu-section row">
+        <label>Stocks:
+            <input type="number" id="stockCount" value="3" min="1" max="99"
+                   style="width:52px">
+        </label>
+        <label style="margin-left:20px">
+            <input type="checkbox" id="debugToggle"> Debug Hitboxes
+        </label>
+    </div>
+
+    <!-- FIGHT button -->
+    <button id="startBtn" class="start-btn">FIGHT!</button>
+
+    <!-- Controls reference -->
+    <div class="controls-help">
+        <h3>Controls</h3>
+        <table>
+            <tr>
+                <th></th><th>WASD</th><th>Arrows</th><th>IJKL</th>
+                <th>Switch Pro</th><th>PS4 / PS5</th>
+            </tr>
+            <tr>
+                <td>Move</td><td>WASD</td><td>Arrow Keys</td><td>IJKL</td>
+                <td>Stick / D-Pad</td><td>Stick / D-Pad</td>
+            </tr>
+            <tr>
+                <td>Jump</td><td>Space</td><td>Numpad 0</td><td>; (semicolon)</td>
+                <td>X / Y</td><td>□ / △</td>
+            </tr>
+            <tr>
+                <td>Attack</td><td>, (comma)</td><td>Numpad 1</td><td>O</td>
+                <td>A</td><td>✕</td>
+            </tr>
+            <tr>
+                <td>Special</td><td>. (period)</td><td>Numpad 2</td><td>P</td>
+                <td>B</td><td>○</td>
+            </tr>
+            <tr>
+                <td>Shield</td><td>Shift</td><td>Numpad 3</td><td>[ (bracket)</td>
+                <td>L / ZL</td><td>L1 / L2</td>
+            </tr>
+            <tr>
+                <td>Grab</td><td>E</td><td>Numpad 4</td><td>U</td>
+                <td>R / ZR</td><td>R1 / R2</td>
+            </tr>
+            <tr>
+                <td>Pause</td><td colspan="3">Escape / P</td>
+                <td>+</td><td>Options</td>
+            </tr>
+        </table>
+        <p>Down Special = Focus Attack (super armor absorb)</p>
+        <p>Ultimate replaces Special when meter is full</p>
+        <p><em>Controllers auto-detected: Switch Pro, PS4, PS5, Xbox</em></p>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!--  SCRIPTS — loaded in dependency order                         -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<!-- 1. Core -->
+<script src="js/settings.js"></script>
+<script src="js/Hitbox.js"></script>
+
+<!-- 2. Data -->
+<script src="js/FighterData.js"></script>
+
+<!-- 3. Entities -->
+<script src="js/Projectile.js"></script>
+<script src="js/Fighter.js"></script>
+
+<!-- 4. World -->
+<script src="js/Physics.js"></script>
+<script src="js/Camera.js"></script>
+<script src="js/Stage.js"></script>
+<script src="js/StageLibrary.js"></script>
+
+<!-- 5. Input -->
+<script src="js/Controller.js"></script>
+<script src="js/InputManager.js"></script>
+<script src="js/KeyboardController.js"></script>
+<script src="js/GamepadController.js"></script>
+<script src="js/AIController.js"></script>
+
+<!-- 6. UI / Systems -->
+<script src="js/HUD.js"></script>
+<script src="js/UltimateManager.js"></script>
+<script src="js/CharacterSelectScene.js"></script>
+
+<!-- 7. Game + Entry -->
+<script src="js/Game.js"></script>
+<script src="js/main.js"></script>
+
+</body>
+</html>
