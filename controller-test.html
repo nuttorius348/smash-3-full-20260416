@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controller Test - InputManager</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1000px;
+            margin: 40px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+        }
+        h1 { text-align: center; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
+        .section {
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            backdrop-filter: blur(10px);
+        }
+        .device-list {
+            display: grid;
+            gap: 10px;
+        }
+        .device {
+            background: rgba(255,255,255,0.15);
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid transparent;
+        }
+        .device.connected {
+            border-color: #4caf50;
+        }
+        .device-type {
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+        .device-name {
+            color: #aad;
+            font-size: 0.9em;
+        }
+        .input-display {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .input-item {
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .input-item.active {
+            background: #4caf50;
+            font-weight: bold;
+        }
+        button {
+            background: #4caf50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .instruction {
+            font-style: italic;
+            color: #cce;
+            margin-top: 10px;
+        }
+        .mapping-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        .mapping-table th,
+        .mapping-table td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        .mapping-table th {
+            background: rgba(255,255,255,0.1);
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎮 Controller Test - InputManager System</h1>
+
+    <div class="section">
+        <h2>🔍 Detected Devices</h2>
+        <button id="scanBtn">Scan for Controllers</button>
+        <div class="instruction">Connect a controller and click Scan, or press any button on a connected controller.</div>
+        <div id="deviceList" class="device-list"></div>
+    </div>
+
+    <div class="section">
+        <h2>📋 Controller Mappings</h2>
+        <table class="mapping-table">
+            <thead>
+                <tr>
+                    <th>Action</th>
+                    <th>Switch Pro</th>
+                    <th>PS4/PS5</th>
+                    <th>Xbox</th>
+                    <th>Keyboard (WASD)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Attack</td>
+                    <td>A (right)</td>
+                    <td>✕ (bottom)</td>
+                    <td>A (bottom)</td>
+                    <td>, (comma)</td>
+                </tr>
+                <tr>
+                    <td>Special</td>
+                    <td>B (bottom)</td>
+                    <td>○ (right)</td>
+                    <td>B (right)</td>
+                    <td>. (period)</td>
+                </tr>
+                <tr>
+                    <td>Jump</td>
+                    <td>X / Y</td>
+                    <td>□ / △</td>
+                    <td>X / Y</td>
+                    <td>Space</td>
+                </tr>
+                <tr>
+                    <td>Shield</td>
+                    <td>L / ZL</td>
+                    <td>L1 / L2</td>
+                    <td>LB / LT</td>
+                    <td>Shift</td>
+                </tr>
+                <tr>
+                    <td>Grab</td>
+                    <td>R / ZR</td>
+                    <td>R1 / R2</td>
+                    <td>RB / RT</td>
+                    <td>E</td>
+                </tr>
+                <tr>
+                    <td>Movement</td>
+                    <td>Stick / D-Pad</td>
+                    <td>Stick / D-Pad</td>
+                    <td>Stick / D-Pad</td>
+                    <td>W/A/S/D</td>
+                </tr>
+                <tr>
+                    <td>Pause</td>
+                    <td>+ (Start)</td>
+                    <td>Options</td>
+                    <td>Menu</td>
+                    <td>Escape</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>🎯 Input Test - P1</h2>
+        <select id="controllerSelect">
+            <option value="">Select a controller...</option>
+        </select>
+        <div class="instruction">Select a controller above, then press buttons to test input.</div>
+        <div id="inputDisplay" class="input-display">
+            <div class="input-item" id="moveX">Move X: 0.00</div>
+            <div class="input-item" id="moveY">Move Y: 0.00</div>
+            <div class="input-item" id="jump">Jump</div>
+            <div class="input-item" id="attack">Attack</div>
+            <div class="input-item" id="special">Special</div>
+            <div class="input-item" id="shield">Shield</div>
+            <div class="input-item" id="grab">Grab</div>
+            <div class="input-item" id="pause">Pause</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>💡 Features Implemented</h2>
+        <ul>
+            <li>✅ Unified InputManager class for all controller types</li>
+            <li>✅ Auto-detection: Switch Pro, PS4, PS5, Xbox controllers</li>
+            <li>✅ Proper button mappings per controller type</li>
+            <li>✅ Three keyboard layouts: WASD, Arrows, IJKL</li>
+            <li>✅ Remapping system (API ready, UI can be added)</li>
+            <li>✅ Multiplayer device assignment via DeviceManager</li>
+            <li>✅ Pause button support (+ on Switch, Options on PS, Escape on keyboard)</li>
+            <li>✅ Analog stick + D-pad input merging</li>
+            <li>✅ Just-pressed vs held button states</li>
+        </ul>
+    </div>
+
+    <!-- Load game scripts -->
+    <script src="js/settings.js"></script>
+    <script src="js/Controller.js"></script>
+    <script src="js/InputManager.js"></script>
+
+    <script>
+        const deviceMgr = new SMASH.DeviceManager();
+        let testController = null;
+        let animFrame = null;
+
+        // Scan and display devices
+        function updateDeviceList() {
+            deviceMgr.scan();
+            const devices = deviceMgr.getDevices();
+            const list = document.getElementById('deviceList');
+            const select = document.getElementById('controllerSelect');
+
+            list.innerHTML = '';
+            
+            // Update select options
+            select.innerHTML = '<option value="">Select a controller...</option>';
+            devices.forEach((dev, idx) => {
+                const option = document.createElement('option');
+                option.value = idx;
+                option.textContent = dev.name;
+                select.appendChild(option);
+            });
+
+            // Display devices
+            devices.forEach(dev => {
+                const div = document.createElement('div');
+                div.className = 'device' + (dev.type !== SMASH.CONTROLLER_TYPES.KEYBOARD ? ' connected' : '');
+                
+                const typeName = {
+                    'keyboard': '⌨️ Keyboard',
+                    'switch_pro': '🎮 Nintendo Switch Pro Controller',
+                    'ps4': '🎮 PlayStation 4 Controller',
+                    'ps5': '🎮 PlayStation 5 DualSense',
+                    'xbox': '🎮 Xbox Controller',
+                    'unknown': '🎮 Generic Controller',
+                }[dev.type] || '🎮 Controller';
+
+                div.innerHTML = `
+                    <div class="device-type">${typeName}</div>
+                    <div class="device-name">${dev.name}</div>
+                `;
+                list.appendChild(div);
+            });
+
+            if (devices.filter(d => d.type !== SMASH.CONTROLLER_TYPES.KEYBOARD).length === 0) {
+                list.innerHTML += '<div class="instruction">No gamepads detected. Connect a controller and click Scan.</div>';
+            }
+        }
+
+        // Setup test controller
+        document.getElementById('controllerSelect').addEventListener('change', (e) => {
+            const idx = parseInt(e.target.value);
+            if (isNaN(idx)) {
+                testController = null;
+                if (animFrame) cancelAnimationFrame(animFrame);
+                return;
+            }
+
+            const devices = deviceMgr.getDevices();
+            const dev = devices[idx];
+            
+            if (dev.type === SMASH.CONTROLLER_TYPES.KEYBOARD) {
+                testController = new SMASH.InputManager({
+                    type: dev.type,
+                    layout: dev.layout,
+                });
+            } else {
+                testController = new SMASH.InputManager({
+                    type: dev.type,
+                    index: dev.index,
+                });
+            }
+
+            startInputTest();
+        });
+
+        // Input test loop
+        function startInputTest() {
+            function loop() {
+                if (!testController) return;
+
+                const result = testController.poll();
+                const inp = result.input;
+
+                // Update display
+                document.getElementById('moveX').textContent = `Move X: ${inp.moveX.toFixed(2)}`;
+                document.getElementById('moveY').textContent = `Move Y: ${inp.moveY.toFixed(2)}`;
+                
+                // Toggle active class for buttons
+                document.getElementById('jump').classList.toggle('active', inp.jump);
+                document.getElementById('attack').classList.toggle('active', inp.attack);
+                document.getElementById('special').classList.toggle('active', inp.special);
+                document.getElementById('shield').classList.toggle('active', inp.shield);
+                document.getElementById('grab').classList.toggle('active', inp.grab);
+                document.getElementById('pause').classList.toggle('active', result.pause);
+
+                // Clear frame state
+                SMASH.InputManager.clearFrame();
+
+                animFrame = requestAnimationFrame(loop);
+            }
+            loop();
+        }
+
+        // Scan button
+        document.getElementById('scanBtn').addEventListener('click', updateDeviceList);
+
+        // Auto-scan on gamepad connect/disconnect
+        window.addEventListener('gamepadconnected', (e) => {
+            console.log('Gamepad connected:', e.gamepad.id);
+            setTimeout(updateDeviceList, 100);
+        });
+
+        window.addEventListener('gamepaddisconnected', (e) => {
+            console.log('Gamepad disconnected:', e.gamepad.id);
+            setTimeout(updateDeviceList, 100);
+        });
+
+        // Initial scan
+        updateDeviceList();
+
+        // Auto-refresh every 2 seconds
+        setInterval(updateDeviceList, 2000);
+    </script>
+</body>
+</html>

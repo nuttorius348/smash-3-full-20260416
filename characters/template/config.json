@@ -1,0 +1,88 @@
+{
+    "name": "Template Fighter",
+    "weight": 100,
+    "width": 50,
+    "height": 80,
+    "walk_speed": 250,
+    "run_speed": 450,
+    "air_speed": 300,
+    "jump_force": 650,
+    "short_hop_force": 420,
+    "double_jump_force": 580,
+    "max_jumps": 2,
+    "fall_speed": 600,
+    "fast_fall_speed": 900,
+    "ultimate_video": "characters/template/ultimate.mp4",
+    "attacks": {
+        "neutral_attack": {
+            "name": "Jab",
+            "pose_key": "idle_attack",
+            "hitbox_x": 35, "hitbox_y": -5, "hitbox_w": 50, "hitbox_h": 30,
+            "damage": 3, "base_knockback": 80, "kb_scaling": 0.3, "angle": 30,
+            "startup_frames": 2, "active_frames": 2, "endlag_frames": 6
+        },
+        "side_attack": {
+            "name": "Side Tilt",
+            "pose_key": "side_attack",
+            "hitbox_x": 40, "hitbox_y": -10, "hitbox_w": 70, "hitbox_h": 35,
+            "damage": 9, "base_knockback": 150, "kb_scaling": 0.8, "angle": 40,
+            "startup_frames": 5, "active_frames": 3, "endlag_frames": 14
+        },
+        "up_attack": {
+            "name": "Up Tilt",
+            "pose_key": "up_attack",
+            "hitbox_x": 0, "hitbox_y": -50, "hitbox_w": 60, "hitbox_h": 55,
+            "damage": 8, "base_knockback": 160, "kb_scaling": 0.9, "angle": 80,
+            "startup_frames": 4, "active_frames": 4, "endlag_frames": 12
+        },
+        "down_attack": {
+            "name": "Down Tilt",
+            "pose_key": "down_attack",
+            "hitbox_x": 35, "hitbox_y": 10, "hitbox_w": 65, "hitbox_h": 25,
+            "damage": 7, "base_knockback": 120, "kb_scaling": 0.6, "angle": 20,
+            "startup_frames": 3, "active_frames": 3, "endlag_frames": 10
+        },
+        "neutral_special": {
+            "name": "Neutral Special",
+            "pose_key": "neutral_special",
+            "hitbox_x": 40, "hitbox_y": -5, "hitbox_w": 40, "hitbox_h": 30,
+            "damage": 8, "base_knockback": 140, "kb_scaling": 0.7, "angle": 35,
+            "startup_frames": 10, "active_frames": 2, "endlag_frames": 18,
+            "spawns_projectile": true,
+            "projectile_type": "linear",
+            "projectile_speed": 600,
+            "projectile_lifetime": 120,
+            "projectile_damage": 8,
+            "projectile_kb": 150,
+            "projectile_angle": 30
+        },
+        "side_special": {
+            "name": "Side Special",
+            "pose_key": "side_special",
+            "hitbox_x": 50, "hitbox_y": -10, "hitbox_w": 75, "hitbox_h": 40,
+            "damage": 12, "base_knockback": 200, "kb_scaling": 1.1, "angle": 35,
+            "startup_frames": 12, "active_frames": 4, "endlag_frames": 22
+        },
+        "up_special": {
+            "name": "Up Special",
+            "pose_key": "up_special",
+            "hitbox_x": 0, "hitbox_y": -40, "hitbox_w": 50, "hitbox_h": 60,
+            "damage": 6, "base_knockback": 170, "kb_scaling": 0.8, "angle": 80,
+            "startup_frames": 5, "active_frames": 6, "endlag_frames": 15
+        },
+        "down_special": {
+            "name": "Down Special",
+            "pose_key": "down_special",
+            "hitbox_x": 0, "hitbox_y": 0, "hitbox_w": 80, "hitbox_h": 20,
+            "damage": 5, "base_knockback": 100, "kb_scaling": 0.4, "angle": 70,
+            "startup_frames": 6, "active_frames": 8, "endlag_frames": 20
+        }
+    },
+    "ultimate_attack": {
+        "name": "Ultimate",
+        "pose_key": "ultimate",
+        "hitbox_x": 0, "hitbox_y": 0, "hitbox_w": 300, "hitbox_h": 200,
+        "damage": 30, "base_knockback": 400, "kb_scaling": 1.5, "angle": 60,
+        "startup_frames": 0, "active_frames": 6, "endlag_frames": 30
+    }
+}
