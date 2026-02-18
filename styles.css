@@ -119,6 +119,27 @@ input[type="checkbox"] { margin-right: 4px; accent-color: #6699cc; }
 }
 .start-btn:active { transform: scale(0.97); }
 
+/* Gallery button */
+.gallery-btn {
+    padding: 10px 36px;
+    font-size: 16px;
+    font-weight: bold;
+    background: linear-gradient(135deg, #3264dc, #285ac8);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    letter-spacing: 4px;
+    margin: 0 0 16px 0;
+    transition: transform 0.12s, box-shadow 0.12s;
+    box-shadow: 0 4px 16px rgba(50, 100, 220, 0.35);
+}
+.gallery-btn:hover {
+    transform: scale(1.06);
+    box-shadow: 0 6px 24px rgba(50, 100, 220, 0.55);
+}
+.gallery-btn:active { transform: scale(0.97); }
+
 /* Controls help */
 .controls-help {
     margin-top: 12px;
