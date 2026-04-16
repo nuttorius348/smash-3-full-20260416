@@ -192,6 +192,7 @@ class AIController {
         if (this._btRecovery(me, inp, canDecide))       { this._applyAccuracy(inp); return inp; }
         if (this._btDodgeProjectile(me, inp, canDecide)) { this._applyAccuracy(inp); return inp; }
         if (this._btUltimate(me, inp, canDecide))        { this._applyAccuracy(inp); return inp; }
+        if (this._btChargeUlt(me, inp, canDecide))       { this._applyAccuracy(inp); return inp; }
         if (this._btElitePogo(me, inp, canDecide))       { return inp; }
         if (this._btEliteShield(me, inp, canDecide))     { return inp; }
         if (this._btShieldReact(me, inp, canDecide))     { return inp; }
@@ -429,6 +430,40 @@ class AIController {
         return false;
     }
 
+    // ── 3B. Charge Ultimate (use ult-charging neutral special) ───
+    _btChargeUlt(me, inp, decide) {
+        if (!decide) return false;
+        if (me.ultimateMeter >= S.ULT_MAX) return false; // meter already full
+
+        // Check if this character has an ult-charging neutral special
+        const neutralSpec = me.data?.neutral_special;
+        if (!neutralSpec || !neutralSpec.chargesUlt) return false;
+
+        const tgt = this._target;
+        if (!tgt) return false;
+
+        const dx   = tgt.x - me.x;
+        const dy   = tgt.y - me.y;
+        const dist = Math.hypot(dx, dy);
+
+        // Only charge when at safe distance from opponents
+        if (dist < 180) return false;
+
+        // Probability based on difficulty and how empty the meter is
+        const meterRatio = me.ultimateMeter / S.ULT_MAX;
+        const chargeProb = 0.02 + this.profile.aggression * 0.08 * (1 - meterRatio);
+
+        if (Math.random() > chargeProb) return false;
+
+        // Use neutral special to charge ult
+        inp.moveX = 0;  // ensure neutral (no direction)
+        inp.moveY = 0;
+        inp.special = true;
+        this._plan = 'charge_ult';
+        this._planFrames = 30;
+        return true;
+    }
+
     // ── 4. Shield reaction (opponent attacking nearby) ───────────
     _btShieldReact(me, inp, decide) {
         if (!decide) return false;
@@ -556,6 +591,8 @@ class AIController {
         } else if (dist < 200) {
             // Mid range — use specials or approach attack
             if (Math.random() < 0.35 + this.profile.aggression * 0.15) {
+                inp.moveX = 0;          // reset to ensure neutral special
+                inp.moveY = 0;
                 inp.special = true;     // neutral-B projectile at range
             } else {
                 inp.moveX = dx > 0 ? 1 : -1;

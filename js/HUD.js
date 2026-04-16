@@ -14,27 +14,46 @@ class HUD {
      * @param {CanvasRenderingContext2D} ctx
      * @param {Array} players — [{port, fighter, controller, isAI}]
      * @param {number} [matchTime] — elapsed seconds
+     * @param {object} [modeInfo] — { gameMode, waveNumber, waveEnemiesLeft }
      */
-    render(ctx, players, matchTime) {
+    render(ctx, players, matchTime, modeInfo) {
         this._frame++;
         const n = players.length;
         if (n === 0) return;
+        const mode = (modeInfo && modeInfo.gameMode) || 'stock';
 
         // Match timer (top-center)
         if (matchTime !== undefined) {
             this._renderTimer(ctx, matchTime);
         }
 
+        // Wave defense header
+        if (mode === 'wave' && modeInfo) {
+            this._renderWaveHeader(ctx, modeInfo.waveNumber, modeInfo.waveEnemiesLeft);
+        }
+
+        // Draft mode header
+        if (mode === 'draft' && modeInfo && modeInfo.draftRemaining) {
+            this._renderDraftHeader(ctx, modeInfo.draftRemaining);
+        }
+
+        // Filter: in wave mode, only show human player panels
+        const displayPlayers = mode === 'wave'
+            ? players.filter(p => !p.isWaveEnemy)
+            : players;
+
         // Player panels (bottom)
-        const panelW = Math.min(280, (S.W - 16 * (n + 1)) / n);
-        const totalW = panelW * n + 12 * (n - 1);
+        const dn = displayPlayers.length;
+        if (dn === 0) return;
+        const panelW = Math.min(280, (S.W - 16 * (dn + 1)) / dn);
+        const totalW = panelW * dn + 12 * (dn - 1);
         const startX = (S.W - totalW) / 2;
         const panelH = 102;
         const panelY = S.H - panelH - 8;
 
-        for (let i = 0; i < n; i++) {
+        for (let i = 0; i < dn; i++) {
             const x = startX + i * (panelW + 12);
-            this._drawPanel(ctx, players[i], x, panelY, panelW, panelH);
+            this._drawPanel(ctx, displayPlayers[i], x, panelY, panelW, panelH, mode);
         }
     }
 
@@ -50,7 +69,46 @@ class HUD {
         ctx.restore();
     }
 
-    _drawPanel(ctx, player, x, y, w, h) {
+    _renderWaveHeader(ctx, waveNum, enemiesLeft) {
+        ctx.save();
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'top';
+
+        // Wave number
+        ctx.font      = 'bold 22px Arial';
+        ctx.fillStyle = '#ff6644';
+        ctx.shadowColor = '#000';
+        ctx.shadowBlur  = 6;
+        ctx.fillText(`WAVE ${waveNum}`, S.W / 2, 28);
+        ctx.shadowBlur = 0;
+
+        // Enemies remaining
+        ctx.font      = '14px Arial';
+        ctx.fillStyle = '#ccc';
+        ctx.fillText(`Enemies remaining: ${enemiesLeft}`, S.W / 2, 54);
+
+        ctx.restore();
+    }
+
+    _renderDraftHeader(ctx, remaining) {
+        ctx.save();
+        ctx.font      = 'bold 18px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffd700';
+        ctx.shadowColor = '#000';
+        ctx.shadowBlur  = 6;
+        ctx.fillText('DRAFT MODE', S.W / 2, 22);
+        ctx.shadowBlur = 0;
+        ctx.font      = '14px Arial';
+        ctx.fillStyle = '#4488ff';
+        ctx.fillText(`P1: ${remaining[0]} left`, S.W / 2 - 80, 44);
+        ctx.fillStyle = '#ff4444';
+        ctx.fillText(`P2: ${remaining[1]} left`, S.W / 2 + 80, 44);
+        ctx.restore();
+    }
+
+    _drawPanel(ctx, player, x, y, w, h, mode) {
         const f     = player.fighter;
         const port  = player.port;
         const color = S.P_COLORS[port % 4];
@@ -64,8 +122,21 @@ class HUD {
         ctx.fill();
 
         // Color accent bar (top edge)
-        ctx.fillStyle = f.isAlive ? color : '#555';
+        const teamColors = ['#ff4444', '#4488ff', '#44dd44', '#ddaa22'];
+        const accentColor = (mode === 'team' && f.team >= 0)
+            ? teamColors[f.team] || color
+            : (f.isAlive ? color : '#555');
+        ctx.fillStyle = accentColor;
         ctx.fillRect(x + 4, y, w - 8, 3);
+
+        // Team label (if team mode)
+        if (mode === 'team' && f.team >= 0) {
+            const teamLabels = ['TEAM A', 'TEAM B', 'TEAM C', 'TEAM D'];
+            ctx.font      = 'bold 10px Arial';
+            ctx.fillStyle = teamColors[f.team] || '#fff';
+            ctx.textAlign = 'right';
+            ctx.fillText(teamLabels[f.team] || 'TEAM ?', x + w - 8, y + 14);
+        }
 
         // ── Player label + character name ─────────────────────────
         ctx.font      = 'bold 14px Arial';
@@ -92,18 +163,59 @@ class HUD {
             return;
         }
 
-        // ── Damage % ─────────────────────────────────────────────
-        const pct = f.damagePercent;
-        let pctColor;
-        if      (pct < 50)  pctColor = '#fff';
-        else if (pct < 100) pctColor = '#ffdd44';
-        else if (pct < 150) pctColor = '#ff8822';
-        else                pctColor = '#ff3333';
+        // ── Damage % / Stamina HP ─────────────────────────────────
+        if (mode === 'stamina' && f.maxStaminaHP > 0) {
+            // HP bar
+            const hpW  = w - 24;
+            const hpH  = 10;
+            const hpX  = x + 12;
+            const hpY  = y + 42;
+            const ratio = Math.max(0, f.staminaHP / f.maxStaminaHP);
 
-        ctx.font      = 'bold 36px Arial';
-        ctx.fillStyle = pctColor;
-        ctx.textAlign = 'center';
-        ctx.fillText(`${Math.floor(pct)}%`, x + w / 2, y + 58);
+            // Track
+            ctx.fillStyle = '#333';
+            ctx.beginPath();
+            ctx.roundRect(hpX, hpY, hpW, hpH, 4);
+            ctx.fill();
+
+            // Fill
+            let hpColor;
+            if      (ratio > 0.5) hpColor = '#44dd44';
+            else if (ratio > 0.25) hpColor = '#ddaa22';
+            else                   hpColor = '#dd3333';
+            if (ratio > 0) {
+                ctx.fillStyle = hpColor;
+                ctx.beginPath();
+                ctx.roundRect(hpX, hpY, hpW * ratio, hpH, 4);
+                ctx.fill();
+            }
+
+            // Border
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth   = 1;
+            ctx.beginPath();
+            ctx.roundRect(hpX, hpY, hpW, hpH, 4);
+            ctx.stroke();
+
+            // HP text
+            ctx.font      = 'bold 18px Arial';
+            ctx.fillStyle = '#fff';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${Math.ceil(f.staminaHP)} HP`, x + w / 2, y + 68);
+        } else {
+            // Standard damage %
+            const pct = f.damagePercent;
+            let pctColor;
+            if      (pct < 50)  pctColor = '#fff';
+            else if (pct < 100) pctColor = '#ffdd44';
+            else if (pct < 150) pctColor = '#ff8822';
+            else                pctColor = '#ff3333';
+
+            ctx.font      = 'bold 36px Arial';
+            ctx.fillStyle = pctColor;
+            ctx.textAlign = 'center';
+            ctx.fillText(`${Math.floor(pct)}%`, x + w / 2, y + 58);
+        }
 
         // ── Stocks (dots) ─────────────────────────────────────────
         const stockY  = y + 78;

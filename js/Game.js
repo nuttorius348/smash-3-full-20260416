@@ -26,7 +26,7 @@
 const S  = SMASH.Settings;
 const ST = SMASH.Fighter.States;
 
-const PAUSE_OPTS    = ['Resume', 'Restart', 'Quit to Menu'];
+const PAUSE_OPTS    = ['Resume', 'Move List', 'Restart', 'Quit to Menu'];
 const GAMEOVER_OPTS = ['Rematch', 'Character Select', 'Main Menu'];
 
 // ══════════════════════════════════════════════════════════════════
@@ -54,12 +54,17 @@ class Game {
         S.DEBUG_HITBOXES  = !!settings.debug;
         S.DEBUG_HURTBOXES = !!settings.debug;
 
+        // ── Game mode ─────────────────────────────────────────────
+        this.gameMode = settings.gameMode || 'stock';  // stock|stamina|team|wave
+
         // ── Core systems ──────────────────────────────────────────
         this.physics = new SMASH.Physics();
         this.camera  = new SMASH.Camera();
         this.hud     = new SMASH.HUD();
         this.projMgr = new SMASH.ProjectileManager();
         this.ultMgr  = new SMASH.UltimateManager();
+        this._ultimateVideos = settings.ultimateVideos !== false;
+        this.ultMgr.setVideoEnabled(this._ultimateVideos);
 
         // ── Stage ─────────────────────────────────────────────────
         const fact = SMASH.StageLibrary[settings.stageKey];
@@ -70,13 +75,56 @@ class Game {
         this.fighters = [];
         this._buildPlayers(playerConfigs, settings.stocks || S.DEFAULT_STOCKS);
 
+        // ── Stamina mode: set HP ──────────────────────────────────
+        if (this.gameMode === 'stamina') {
+            const hp = settings.staminaHP || 150;
+            for (const f of this.fighters) {
+                f.staminaHP    = hp;
+                f.maxStaminaHP = hp;
+            }
+        }
+
+        // ── Team mode: assign teams ───────────────────────────────
+        if (this.gameMode === 'team') {
+            this._assignTeams();
+        }
+
+        // ── Match stats (init early for wave defense) ────────────
+        this._stats = {};  // Initialize empty, will be populated by _initStats and _spawnWaveEnemy
+
+        // ── Wave defense mode ─────────────────────────────────────
+        this._waveNumber      = 0;
+        this._waveEnemies     = [];   // AI fighter references
+        this._waveSpawnTimer  = 0;
+        this._waveClearTimer  = 0;
+        this._waveTargetCount = 0;    // total enemies to spawn this wave
+        this._waveSpawned     = 0;    // how many spawned so far
+        this._waveKills       = 0;
+        if (this.gameMode === 'wave') {
+            // Wave mode: 1 stock for human players (die once = lose)
+            for (const f of this.fighters) {
+                f.stocks = 1;
+            }
+            this._startWave(1);
+        }
+
+        // ── Draft mode queues ─────────────────────────────────────
+        // Populated via setDraftQueues() before start()
+        this._draftQueues = playerConfigs.map(() => []);
+        this._draftCurrent = playerConfigs.map(() => 0);
+        if (this.gameMode === 'draft') {
+            // Each fighter gets 1 stock (death = swap character)
+            for (const f of this.fighters) f.stocks = 1;
+        }
+
         // ── Game state ────────────────────────────────────────────
         this.state           = 'countdown';
-        this._countdownTimer = 195;   // ~3.25 s at 60 fps (includes "GO!")
+        this._countdownTimer = 195;
         this._winner         = null;
-        this._matchTime      = 0;     // elapsed playing time (seconds)
+        this._winTeam        = -1;
+        this._matchTime      = 0;
 
-        // ── Match stats ───────────────────────────────────────────
+        // Populate player stats
         this._initStats();
 
         // ── Menu cursor ───────────────────────────────────────────
@@ -85,6 +133,16 @@ class Game {
         // ── KO notification ───────────────────────────────────────
         this._koAlpha = 0;
         this._koMsg   = '';
+
+        // ── Mini cutscene (character transformations) ────────────
+        this._miniCutscene = {
+            active: false,
+            timer: 0,
+            duration: 1.8,
+            title: '',
+            subtitle: '',
+            port: -1,
+        };
 
         // ── Timing ────────────────────────────────────────────────
         this._lastTime = 0;
@@ -97,6 +155,11 @@ class Game {
         this._onKU = e => { this._mk[e.code] = false; };
         window.addEventListener('keydown', this._onKD);
         window.addEventListener('keyup',   this._onKU);
+
+        // ── Multiplayer guest mode ────────────────────────────────
+        // When true, the game only renders — no simulation.
+        // Host sends authoritative state via applyState().
+        this._guestMode = !!settings.guestMode;
     }
 
     // ── Helpers ──────────────────────────────────────────────────
@@ -104,8 +167,11 @@ class Game {
     _jp(code) { return !!this._mk[code] && !this._mkp[code]; }
 
     _initStats() {
-        this._stats = {};
+        // Don't reset this._stats, just add/update player entries
         for (const p of this.players) {
+            // Skip wave enemies (they add their own stats)
+            if (p.isWaveEnemy) continue;
+            
             this._stats[p.port] = {
                 port:  p.port,
                 name:  p.fighter.data.name || '???',
@@ -131,7 +197,10 @@ class Game {
             fighter.stocks = stocks;
 
             let ctrl;
-            if (cfg.deviceConfig) {
+            if (cfg._netController) {
+                // Multiplayer: use the pre-built NetworkController
+                ctrl = cfg._netController;
+            } else if (cfg.deviceConfig) {
                 ctrl = new SMASH.InputManager(cfg.deviceConfig);
             } else {
                 switch (cfg.type) {
@@ -149,6 +218,7 @@ class Game {
                 fighter:    fighter,
                 controller: ctrl,
                 isAI:       cfg.type === 'ai',
+                characterKey: cfg.character || 'brawler',
             };
             this.players.push(player);
             this.fighters.push(fighter);
@@ -163,15 +233,207 @@ class Game {
     }
 
     // ═════════════════════════════════════════════════════════════
+    //  TEAM ASSIGNMENT
+    // ═════════════════════════════════════════════════════════════
+
+    _assignTeams() {
+        // Read team assignments from player configs (set in character select)
+        for (const p of this.players) {
+            const cfg = this._configs.find(c => c.port === p.port);
+            if (cfg && cfg.team >= 0) {
+                p.fighter.team = cfg.team;  // 0=A, 1=B, 2=C, 3=D
+            } else {
+                p.fighter.team = p.port % 2;  // fallback: alternate A/B
+            }
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    //  DRAFT MODE
+    // ═════════════════════════════════════════════════════════════
+
+    /**
+     * Set draft character queues for each player.
+     * @param {string[]} p1Queue — character keys for P1 (8 entries)
+     * @param {string[]} p2Queue — character keys for P2 (8 entries)
+     */
+    setDraftQueues(p1QueueOrAll, p2Queue) {
+        if (p2Queue !== undefined) {
+            // Legacy 2-player: setDraftQueues(p1, p2)
+            this._draftQueues = [p1QueueOrAll || [], p2Queue || []];
+        } else if (Array.isArray(p1QueueOrAll)) {
+            // Array-of-queues for N players: setDraftQueues([q0, q1, ...])
+            this._draftQueues = p1QueueOrAll.map(q => q || []);
+        }
+        this._draftCurrent = this._draftQueues.map(() => 0);
+    }
+
+    /**
+     * Swap a fighter's character data to the next in their draft queue.
+     * Returns false if no more characters remain.
+     */
+    _draftSwapNext(playerIdx) {
+        const queue = this._draftQueues[playerIdx];
+        const cur   = this._draftCurrent[playerIdx];
+        if (cur >= queue.length) return false; // no more characters
+
+        const nextKey  = queue[cur];
+        const newData  = new SMASH.FighterData(nextKey);
+        const player   = this.players[playerIdx];
+        const fighter  = player.fighter;
+        const spawns   = this.stage.spawns;
+        const sp       = spawns[player.port % spawns.length];
+
+        // Swap character data
+        fighter.data   = newData;
+        fighter.width  = newData.width;
+        fighter.height = newData.height;
+
+        // Reset fighter state
+        fighter.stocks         = 1;
+        fighter.damagePercent  = 0;
+        fighter.ultimateMeter  = 0;
+        fighter.x              = sp[0];
+        fighter.y              = sp[1] - 200;
+        fighter.vx             = 0;
+        fighter.vy             = 0;
+        fighter.state          = ST.AIRBORNE;
+        fighter.invincible     = true;
+        fighter._invFrames     = S.RESPAWN_INV_FRAMES;
+        fighter.hitstunFrames  = 0;
+        fighter.currentAttack  = null;
+        fighter.activeHitbox   = null;
+        fighter.fastFalling    = false;
+        fighter.jumpsRemaining = newData.maxJumps;
+        fighter.shieldHP       = S.SHIELD_MAX_HP;
+        fighter._armorHitsLeft = 0;
+        fighter.grounded       = false;
+        if (fighter.maxStaminaHP > 0) {
+            fighter.staminaHP    = fighter.maxStaminaHP;
+        }
+
+        // Update player's characterKey
+        player.characterKey = nextKey;
+
+        // Advance queue pointer
+        this._draftCurrent[playerIdx] = cur + 1;
+        return true;
+    }
+
+    /** How many characters remain in a player's draft queue (including current). */
+    _draftRemaining(playerIdx) {
+        return this._draftQueues[playerIdx].length - this._draftCurrent[playerIdx];
+    }
+
+    _sameTeam(a, b) {
+        if (this.gameMode !== 'team') return false;
+        return a.team >= 0 && a.team === b.team;
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    //  WAVE DEFENSE
+    // ═════════════════════════════════════════════════════════════
+
+    _startWave(num) {
+        this._waveNumber = num;
+        this._waveSpawnTimer  = 0;
+        this._waveClearTimer  = 0;
+        this._waveTargetCount = 1 + num;  // wave 1 = 2, wave 2 = 3, etc.
+        this._waveSpawned     = 0;
+
+        // Remove old dead wave enemies from fighters/players
+        this.players  = this.players.filter(p => !p.isWaveEnemy || p.fighter.isAlive);
+        this.fighters = this.fighters.filter(f => !this._waveEnemies.includes(f) || f.isAlive);
+        this._waveEnemies = [];
+
+        // Spawn the first enemy immediately
+        this._spawnWaveEnemy();
+    }
+
+    /** Spawn a single wave enemy with random character. */
+    _spawnWaveEnemy() {
+        const num  = this._waveNumber;
+        const idx  = this._waveSpawned;
+        const keys   = SMASH.getCharacterKeys();
+        const spawns = this.stage.spawns;
+        const difficulty = Math.min(10, 2 + num);
+
+        const wavePort = 10 + (num - 1) * 20 + idx;
+        const charKey  = keys[Math.floor(Math.random() * keys.length)];
+        const sp       = spawns[(idx + 2) % spawns.length];
+        const data     = new SMASH.FighterData(charKey);
+        const fighter  = new SMASH.Fighter(wavePort, data, sp[0], sp[1]);
+        fighter.stocks = 1;
+
+        // Wave enemies get stamina HP that scales with wave
+        fighter.staminaHP    = 80 + num * 20;
+        fighter.maxStaminaHP = 80 + num * 20;
+
+        const ctrl = new SMASH.AIController(wavePort, difficulty);
+        const player = {
+            port:       wavePort,
+            fighter:    fighter,
+            controller: ctrl,
+            isAI:       true,
+            isWaveEnemy: true,
+        };
+
+        this.players.push(player);
+        this.fighters.push(fighter);
+        this._waveEnemies.push(fighter);
+        this._waveSpawned++;
+
+        // Init stats for this enemy
+        this._stats[wavePort] = {
+            port: wavePort, name: data.name || '???',
+            color: '#888', kills: 0, falls: 0, damageDealt: 0,
+        };
+
+        // Re-link ALL AI context so everyone sees the new fighter
+        for (const p of this.players) {
+            if (p.controller instanceof SMASH.AIController) {
+                p.controller.setContext(this.fighters, this.stage, this.projMgr.list);
+            }
+        }
+    }
+
+    _tickWaveDefense() {
+        // ── Staggered spawning during the wave ────────────────────
+        if (this._waveSpawned < this._waveTargetCount) {
+            this._waveSpawnTimer++;
+            // Spawn interval: 90 frames (~1.5s) between each enemy
+            const spawnInterval = Math.max(45, 90 - this._waveNumber * 3);
+            if (this._waveSpawnTimer >= spawnInterval) {
+                this._waveSpawnTimer = 0;
+                this._spawnWaveEnemy();
+            }
+        }
+
+        // ── Check if all wave enemies for this wave are dead ──────
+        const allSpawned = this._waveSpawned >= this._waveTargetCount;
+        const allDead    = allSpawned && this._waveEnemies.length > 0 &&
+            this._waveEnemies.every(f => !f.isAlive);
+
+        if (allDead) {
+            this._waveClearTimer++;
+            if (this._waveClearTimer > 120) {  // 2 second pause
+                this._startWave(this._waveNumber + 1);
+            }
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════
     //  LIFECYCLE
     // ═════════════════════════════════════════════════════════════
 
     start() {
+        this._running  = true;
         this._lastTime = performance.now();
         this._raf = requestAnimationFrame(t => this._loop(t));
     }
 
     stop() {
+        this._running = false;
         if (this._raf) cancelAnimationFrame(this._raf);
         this._raf = null;
         window.removeEventListener('keydown', this._onKD);
@@ -179,8 +441,26 @@ class Game {
     }
 
     _loop(now) {
+        if (!this._running) return;           // ← ensures stop() works mid-frame
+
         const dt = Math.min((now - this._lastTime) / 1000, 1 / 30);
         this._lastTime = now;
+
+        // Guest mode: only render, no simulation (host state arrives via applyState)
+        if (this._guestMode) {
+            // Update camera to track fighters (normally done in _tickPlaying)
+            this.camera.update(this.fighters, this.stage, dt);
+            this._render();
+            this._mkp = Object.assign({}, this._mk);
+
+            // MUST clear one-shot keyboard actions even in guestMode,
+            // otherwise _framePressed accumulates and sends phantom inputs forever
+            if (SMASH.KeyboardController)  SMASH.KeyboardController.clearFrame();
+            if (SMASH.InputManager && SMASH.InputManager.clearFrame) SMASH.InputManager.clearFrame();
+
+            if (this._running) this._raf = requestAnimationFrame(t => this._loop(t));
+            return;
+        }
 
         this._update(dt);
         this._render();
@@ -192,7 +472,7 @@ class Game {
         if (SMASH.KeyboardController)  SMASH.KeyboardController.clearFrame();
         if (SMASH.InputManager && SMASH.InputManager.clearFrame) SMASH.InputManager.clearFrame();
 
-        this._raf = requestAnimationFrame(t => this._loop(t));
+        if (this._running) this._raf = requestAnimationFrame(t => this._loop(t));
     }
 
     // ═════════════════════════════════════════════════════════════
@@ -207,6 +487,7 @@ class Game {
             case 'countdown': return this._tickCountdown(dt);
             case 'playing':   return this._tickPlaying(dt);
             case 'paused':    return this._tickPause();
+            case 'movelist':  return this._tickMoveList();
             case 'gameover':  return this._tickGameOver();
         }
     }
@@ -214,7 +495,14 @@ class Game {
     // ── Countdown ────────────────────────────────────────────────
 
     _tickCountdown(dt) {
+        const prevSec = Math.ceil(this._countdownTimer / 60);
         this._countdownTimer--;
+        const sec = Math.ceil(this._countdownTimer / 60);
+
+        if (SMASH.SFX && sec > 0 && sec <= 3 && sec !== prevSec) {
+            SMASH.SFX.playCountdown();
+        }
+
         // Camera tracks fighters even during countdown
         this.camera.update(this.fighters, this.stage, dt);
         if (this._countdownTimer <= 0) this.state = 'playing';
@@ -228,6 +516,15 @@ class Game {
         // 0. Ultimate cutscene — blocks all normal updates
         if (this.ultMgr.active) {
             this.ultMgr.update(dt);
+            return;
+        }
+
+        // 0b. Mini transformation cutscene
+        if (this._miniCutscene.active) {
+            this._miniCutscene.timer -= dt;
+            if (this._miniCutscene.timer <= 0) {
+                this._miniCutscene.active = false;
+            }
             return;
         }
 
@@ -260,6 +557,12 @@ class Game {
             const event = p.fighter.update(inp, dt);
             if (event && event.type === 'ultimate') this._onUltimate(p.fighter);
             this._checkProjSpawn(p.fighter);
+
+            if (p.fighter.consumeVaughanTransformCutsceneEvent && p.fighter.consumeVaughanTransformCutsceneEvent()) {
+                if (SMASH.SFX) SMASH.SFX.playNewChallenger();
+                this._startMiniCutscene('VON AWAKENED', `${p.fighter.data.name.toUpperCase()} TRANSFORMS`, p.fighter.port);
+                return;
+            }
         }
 
         // 2. Melee combat resolution
@@ -298,7 +601,10 @@ class Game {
         for (let i = 0; i < this.fighters.length; i++) {
             const f = this.fighters[i];
             if (f.stocks < preStocks[i]) {
-                this._stats[f.port].falls++;
+                if (SMASH.SFX) SMASH.SFX.playStageFall();
+
+                // Check if this stats entry exists (wave enemies added dynamically)
+                if (this._stats[f.port]) this._stats[f.port].falls++;
 
                 // Credit kill to last attacker (if not self)
                 const src = f._lastHitBy;
@@ -306,18 +612,62 @@ class Game {
                     this._stats[src].kills++;
                 }
 
+                if (SMASH.SFX && src !== undefined && src !== f.port && f._lastHitWasSpecial) {
+                    SMASH.SFX.playFinisher();
+                }
+
+                // Track wave kills
+                if (this.gameMode === 'wave' && this._waveEnemies.includes(f)) {
+                    this._waveKills++;
+                }
+
+                // ── Stock stealing (team mode) ────────────────────
+                if (this.gameMode === 'team' && !f.isAlive && f.team >= 0) {
+                    const donor = this.fighters.find(t =>
+                        t !== f && t.team === f.team && t.isAlive && t.stocks > 1
+                    );
+                    if (donor) {
+                        donor.stocks--;
+                        f.stocks = 1;
+                        f._respawn();
+                        this._koAlpha = 1.0;
+                        this._koMsg = `P${donor.port + 1} gave a stock to P${f.port + 1}!`;
+                        continue;  // skip normal KO message
+                    }
+                }
+
+                // ── Draft mode: swap to next character ────────────
+                if (this.gameMode === 'draft' && !f.isAlive) {
+                    const pIdx = i; // player index in this.players array
+                    if (this._draftSwapNext(pIdx)) {
+                        const newName = SMASH.ROSTER[this.players[pIdx].characterKey].name;
+                        this._koAlpha = 1.0;
+                        this._koMsg = `P${f.port + 1} swaps to ${newName}! (${this._draftRemaining(pIdx)} left)`;
+                        continue;
+                    }
+                }
+
                 // KO notification
                 this._koAlpha = 1.0;
-                this._koMsg   = f.stocks > 0
-                    ? `P${f.port + 1} lost a stock!`
-                    : `P${f.port + 1} eliminated!`;
+                if (this.gameMode === 'wave' && this._waveEnemies.includes(f)) {
+                    this._koMsg = `Wave enemy defeated!`;
+                } else {
+                    this._koMsg = f.stocks > 0
+                        ? `P${f.port + 1} lost a stock!`
+                        : `P${f.port + 1} eliminated!`;
+                }
+
+                f._lastHitWasSpecial = false;
             }
         }
 
         // 8. Camera
         this.camera.update(this.fighters, this.stage, dt);
 
-        // 9. Win check
+        // 9. Wave defense tick
+        if (this.gameMode === 'wave') this._tickWaveDefense();
+
+        // 10. Win check
         this._checkGameOver();
     }
 
@@ -339,6 +689,7 @@ class Game {
             // Try to grab a nearby fighter
             for (const tgt of this.fighters) {
                 if (tgt === atk || !tgt.isAlive || tgt.invincible) continue;
+                if (this._sameTeam(atk, tgt)) continue; // no friendly grabs
                 if (atk.tryGrab(tgt)) break;
             }
         }
@@ -350,6 +701,7 @@ class Game {
 
             for (const tgt of this.fighters) {
                 if (tgt === atk || !tgt.isAlive || tgt.invincible) continue;
+                if (this._sameTeam(atk, tgt)) continue; // no friendly fire
                 if (tgt.state === 'grabbed') continue; // Can't hit grabbed fighters (grabber pummels them)
                 if (atk.activeHitbox.checkHit(atk, tgt)) {
                     const isSpec = tgt.state !== 'shield' &&
@@ -358,6 +710,19 @@ class Game {
                     tgt.takeHit(atk.activeHitbox, atk.facing, isSpec, isUlt);
                     tgt._lastHitBy = atk.port;
                     this._stats[atk.port].damageDealt += atk.activeHitbox.damage;
+
+                    // ── Damage multiplier hit tracking (Fazbear) ─
+                    if (atk.boostedHitsLeft > 0) {
+                        atk.boostedHitsLeft--;
+                        if (atk.boostedHitsLeft <= 0) {
+                            atk.damageMultiplier = 1.0;
+                        }
+                    }
+
+                    // ── Slippery effect (Baby Oil) ───────────────
+                    if (atk.currentAttack && atk.currentAttack.makesSlippery) {
+                        tgt.slipperyTimer = S.SLIPPERY_DURATION_FRAMES;
+                    }
 
                     // ── Pogo bounce: down-air on top → attacker bounces ──
                     if (atk.currentAttack && this._isDownAir(atk) && !atk.grounded) {
@@ -390,7 +755,46 @@ class Game {
         this.ultMgr.trigger(attacker, this.fighters);
     }
 
+    _startMiniCutscene(title, subtitle, port) {
+        this._miniCutscene.active = true;
+        this._miniCutscene.timer = this._miniCutscene.duration;
+        this._miniCutscene.title = title || '';
+        this._miniCutscene.subtitle = subtitle || '';
+        this._miniCutscene.port = port;
+    }
+
     _checkGameOver() {
+        if (this.gameMode === 'wave') {
+            // Wave defense: game over when all human players are dead
+            const humanPlayers = this.players.filter(p => !p.isWaveEnemy);
+            const allHumansDead = humanPlayers.every(p => !p.fighter.isAlive);
+            if (allHumansDead) {
+                this.state    = 'gameover';
+                this._winner  = null; // no winner in wave defense
+                this._menuIdx = 0;
+            }
+            return;
+        }
+
+        if (this.gameMode === 'team') {
+            // Team mode: game over when only one team has living fighters
+            const teamsAlive = new Set();
+            for (const f of this.fighters) {
+                if (f.isAlive && f.team >= 0) teamsAlive.add(f.team);
+            }
+            if (teamsAlive.size <= 1 && this.fighters.some(f => f.team >= 0)) {
+                this.state    = 'gameover';
+                const winTeam = teamsAlive.size === 1 ? [...teamsAlive][0] : -1;
+                this._winTeam = winTeam;
+                this._winner  = winTeam >= 0
+                    ? this.fighters.find(f => f.team === winTeam && f.isAlive) || null
+                    : null;
+                this._menuIdx = 0;
+            }
+            return;
+        }
+
+        // Stock / Stamina: standard last-fighter-standing
         const alive = this.fighters.filter(f => f.isAlive);
         if (alive.length <= 1 && this.fighters.length > 1) {
             this.state    = 'gameover';
@@ -416,10 +820,45 @@ class Game {
         if (this._jp('Enter') || this._jp('NumpadEnter') || this._jp('Space')) {
             switch (this._menuIdx) {
                 case 0: this.state = 'playing'; break;      // Resume
-                case 1: this._restart();        break;      // Restart
-                case 2: this._exit('menu');     break;      // Quit
+                case 1:                                      // Move List
+                    this.state = 'movelist';
+                    this._mlCharIdx  = 0;
+                    this._mlScroll   = 0;
+                    this._menuIdx    = 0;
+                    break;
+                case 2: this._restart();        break;      // Restart
+                case 3: this._exit('menu');     break;      // Quit
             }
         }
+    }
+
+    // ── Move List ─────────────────────────────────────────────────
+
+    _tickMoveList() {
+        const keys = SMASH.getCharacterKeys();
+
+        // Escape / P → back to pause menu
+        if (this._jp('Escape') || this._jp('KeyP')) {
+            this.state    = 'paused';
+            this._menuIdx = 0;
+            return;
+        }
+
+        // Left / Right → cycle character
+        if (this._jp('ArrowLeft') || this._jp('KeyA')) {
+            this._mlCharIdx = (this._mlCharIdx - 1 + keys.length) % keys.length;
+            this._mlScroll  = 0;
+        }
+        if (this._jp('ArrowRight') || this._jp('KeyD')) {
+            this._mlCharIdx = (this._mlCharIdx + 1) % keys.length;
+            this._mlScroll  = 0;
+        }
+
+        // Up / Down → scroll move list
+        if (this._jp('ArrowUp') || this._jp('KeyW'))
+            this._mlScroll = Math.max(0, this._mlScroll - 1);
+        if (this._jp('ArrowDown') || this._jp('KeyS'))
+            this._mlScroll++;
     }
 
     // ── Game-over menu ───────────────────────────────────────────
@@ -445,6 +884,23 @@ class Game {
 
     _restart() {
         const stocks = this._settings.stocks || S.DEFAULT_STOCKS;
+
+        // ── Wave mode: remove wave enemies first ──────────────────
+        if (this.gameMode === 'wave') {
+            // Remove wave enemies from players/fighters arrays
+            this.players  = this.players.filter(p => !p.isWaveEnemy);
+            this.fighters = this.fighters.filter(f => {
+                return this.players.some(p => p.fighter === f);
+            });
+            this._waveEnemies     = [];
+            this._waveNumber      = 0;
+            this._waveSpawnTimer  = 0;
+            this._waveClearTimer  = 0;
+            this._waveTargetCount = 0;
+            this._waveSpawned     = 0;
+            this._waveKills       = 0;
+        }
+
         for (const p of this.players) {
             const f  = p.fighter;
             const sp = this.stage.spawns[p.port % this.stage.spawns.length];
@@ -475,10 +931,51 @@ class Game {
             f.grabTarget     = null;
             f.grabHitsDealt  = 0;
             f.grabTimer      = 0;
+            // Clear damage multiplier
+            f.damageMultiplier = 1.0;
+            f.boostedHitsLeft  = 0;
+            f.slipperyTimer    = 0;
+        }
+
+        // ── Stamina mode: restore HP ──────────────────────────────
+        if (this.gameMode === 'stamina') {
+            const hp = this._settings.staminaHP || 150;
+            for (const f of this.fighters) {
+                f.staminaHP    = hp;
+                f.maxStaminaHP = hp;
+            }
+        }
+
+        // ── Team mode: re-assign teams ────────────────────────────
+        if (this.gameMode === 'team') {
+            this._assignTeams();
+        }
+
+        // ── Wave mode: 1 stock for human players ──────────────────
+        if (this.gameMode === 'wave') {
+            for (const f of this.fighters) {
+                f.stocks = 1;
+            }
+        }
+
+        // ── Draft mode: reset queue and load first characters ─────
+        if (this.gameMode === 'draft') {
+            this._draftCurrent = [0, 0];
+            for (let i = 0; i < this.players.length && i < 2; i++) {
+                const firstKey = (i === 0 ? this._configs[0].character : this._configs[1].character);
+                const newData  = new SMASH.FighterData(firstKey);
+                const f = this.players[i].fighter;
+                f.data   = newData;
+                f.width  = newData.width;
+                f.height = newData.height;
+                f.stocks = 1;
+                this.players[i].characterKey = firstKey;
+            }
         }
 
         this.projMgr.clear();
         this.ultMgr = new SMASH.UltimateManager();
+        this.ultMgr.setVideoEnabled(this._ultimateVideos);
 
         // Re-link AI context
         for (const p of this.players) {
@@ -491,8 +988,14 @@ class Game {
         this.state           = 'countdown';
         this._countdownTimer = 195;
         this._winner         = null;
+        this._winTeam        = -1;
         this._menuIdx        = 0;
         this._matchTime      = 0;
+
+        // ── Wave mode: start wave 1 ──────────────────────────────
+        if (this.gameMode === 'wave') {
+            this._startWave(1);
+        }
     }
 
     _exit(reason) {
@@ -523,10 +1026,21 @@ class Game {
         for (const f of this.fighters) f.render(ctx, cam);
 
         // HUD
-        this.hud.render(ctx, this.players, this._matchTime);
+        const modeInfo = {
+            gameMode:         this.gameMode,
+            waveNumber:       this._waveNumber,
+            waveEnemiesLeft:  this._waveEnemies.filter(f => f.isAlive).length,
+            draftRemaining:   this.gameMode === 'draft'
+                ? [this._draftRemaining(0), this._draftRemaining(1)]
+                : null,
+        };
+        this.hud.render(ctx, this.players, this._matchTime, modeInfo);
 
         // Ultimate cutscene overlay
         this.ultMgr.render(ctx);
+
+        // Mini transformation cutscene overlay
+        this._renderMiniCutscene(ctx);
 
         // KO flash
         if (this._koAlpha > 0) this._renderKO(ctx);
@@ -534,7 +1048,59 @@ class Game {
         // State overlays
         if (this.state === 'countdown') this._renderCountdown(ctx);
         if (this.state === 'paused')    this._renderPause(ctx);
+        if (this.state === 'movelist')  this._renderMoveList(ctx);
         if (this.state === 'gameover')  this._renderGameOver(ctx);
+    }
+
+    _renderMiniCutscene(ctx) {
+        if (!this._miniCutscene.active) return;
+
+        const mc = this._miniCutscene;
+        const p = mc.duration > 0 ? 1 - (mc.timer / mc.duration) : 1;
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 110);
+
+        ctx.save();
+
+        // Cinematic letterbox + vignette tint
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(0, 0, S.W, S.H);
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.fillRect(0, 0, S.W, 88);
+        ctx.fillRect(0, S.H - 88, S.W, 88);
+
+        // Center flash panel
+        const panelW = 940;
+        const panelH = 250;
+        const px = (S.W - panelW) / 2;
+        const py = (S.H - panelH) / 2;
+
+        const alpha = Math.min(0.9, 0.25 + p * 0.7);
+        const grad = ctx.createLinearGradient(px, py, px + panelW, py + panelH);
+        grad.addColorStop(0, `rgba(90,20,20,${alpha.toFixed(3)})`);
+        grad.addColorStop(0.5, `rgba(210,35,35,${(alpha + 0.08).toFixed(3)})`);
+        grad.addColorStop(1, `rgba(90,20,20,${alpha.toFixed(3)})`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(px, py, panelW, panelH);
+
+        ctx.strokeStyle = '#ffd7a6';
+        ctx.lineWidth = 3 + pulse * 3;
+        ctx.strokeRect(px, py, panelW, panelH);
+
+        // Headline + subtitle
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 78px Arial';
+        ctx.strokeStyle = 'rgba(20,0,0,0.95)';
+        ctx.lineWidth = 8;
+        ctx.strokeText(mc.title, S.W / 2, py + 112);
+        ctx.fillStyle = '#fff2d9';
+        ctx.fillText(mc.title, S.W / 2, py + 112);
+
+        ctx.font = 'bold 30px Arial';
+        ctx.fillStyle = '#ffe7cf';
+        ctx.fillText(mc.subtitle, S.W / 2, py + 182);
+
+        ctx.restore();
     }
 
     // ── Countdown ────────────────────────────────────────────────
@@ -613,6 +1179,175 @@ class Game {
         ctx.restore();
     }
 
+    // ── Move List overlay ────────────────────────────────────────
+
+    _renderMoveList(ctx) {
+        const keys    = SMASH.getCharacterKeys();
+        const charKey = keys[this._mlCharIdx];
+        const data    = SMASH.ROSTER[charKey];
+        if (!data) return;
+
+        ctx.save();
+
+        // Dim background
+        ctx.fillStyle = 'rgba(0,0,0,0.82)';
+        ctx.fillRect(0, 0, S.W, S.H);
+
+        ctx.textBaseline = 'middle';
+
+        // ── Title bar ─────────────────────────────────────────────
+        ctx.textAlign = 'center';
+        ctx.font      = 'bold 38px Arial';
+        ctx.fillStyle = '#ffd700';
+        ctx.fillText('MOVE LIST', S.W / 2, 38);
+
+        // Character name + arrows
+        ctx.font      = 'bold 30px Arial';
+        ctx.fillStyle = data.color || '#fff';
+        ctx.fillText(data.name, S.W / 2, 82);
+
+        ctx.font      = '24px Arial';
+        ctx.fillStyle = '#888';
+        ctx.fillText('◀', S.W / 2 - 160, 82);
+        ctx.fillText('▶', S.W / 2 + 160, 82);
+
+        ctx.font      = '14px Arial';
+        ctx.fillStyle = '#555';
+        ctx.fillText(`${this._mlCharIdx + 1} / ${keys.length}`, S.W / 2, 108);
+
+        // ── Build move entries ────────────────────────────────────
+        const CATEGORIES = [
+            { label: 'GROUND NORMALS', keys: ['neutral_attack', 'side_attack', 'up_attack', 'down_attack'] },
+            { label: 'AERIALS',        keys: ['neutral_air', 'forward_air', 'up_air', 'down_air'] },
+            { label: 'SPECIALS',       keys: ['neutral_special', 'side_special', 'up_special', 'down_special'] },
+        ];
+
+        const entries = [];  // { type: 'header'|'move', ... }
+
+        for (const cat of CATEGORIES) {
+            entries.push({ type: 'header', label: cat.label });
+            for (const ak of cat.keys) {
+                const atk = data.attacks && data.attacks[ak];
+                if (atk) entries.push({ type: 'move', attack: atk, key: ak });
+            }
+        }
+
+        // Ultimate
+        if (data.ultimateAttack) {
+            entries.push({ type: 'header', label: 'ULTIMATE' });
+            entries.push({ type: 'move', attack: data.ultimateAttack, key: 'ultimate', isUlt: true });
+        }
+
+        // ── Scroll clamp ─────────────────────────────────────────
+        const ROW_H      = 56;
+        const HDR_H      = 34;
+        const PANEL_TOP  = 130;
+        const PANEL_BOT  = S.H - 40;
+        const viewH      = PANEL_BOT - PANEL_TOP;
+
+        // Total content height
+        let totalH = 0;
+        for (const e of entries) totalH += e.type === 'header' ? HDR_H : ROW_H;
+
+        const maxScroll = Math.max(0, Math.ceil((totalH - viewH) / ROW_H));
+        if (this._mlScroll > maxScroll) this._mlScroll = maxScroll;
+
+        // ── Clip region ──────────────────────────────────────────
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, PANEL_TOP, S.W, viewH);
+        ctx.clip();
+
+        let curY = PANEL_TOP - this._mlScroll * ROW_H;
+
+        const LEFT   = 60;
+        const COL_W  = S.W - 120;
+
+        for (const entry of entries) {
+            if (entry.type === 'header') {
+                // Category header
+                const h = HDR_H;
+                if (curY + h > PANEL_TOP - 40 && curY < PANEL_BOT + 40) {
+                    ctx.fillStyle = 'rgba(255,215,0,0.12)';
+                    ctx.fillRect(LEFT, curY, COL_W, h);
+                    ctx.font      = 'bold 16px Arial';
+                    ctx.fillStyle = '#ffd700';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(entry.label, LEFT + 14, curY + h / 2);
+                }
+                curY += h;
+            } else {
+                // Move row
+                const h   = ROW_H;
+                const atk = entry.attack;
+
+                if (curY + h > PANEL_TOP - 40 && curY < PANEL_BOT + 40) {
+                    // Alternating row bg
+                    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+                    ctx.fillRect(LEFT, curY, COL_W, h);
+
+                    const midY = curY + h / 2;
+
+                    // Move name
+                    ctx.textAlign = 'left';
+                    ctx.font      = 'bold 18px Arial';
+                    ctx.fillStyle = entry.isUlt ? '#ff6644' : '#fff';
+                    ctx.fillText(atk.name || entry.key, LEFT + 14, midY - 10);
+
+                    // Stats line
+                    ctx.font      = '13px Arial';
+                    ctx.fillStyle = '#aaa';
+
+                    let stats = `DMG: ${atk.damage}`;
+                    stats += `   KB: ${atk.baseKB}`;
+                    if (atk.kbScaling) stats += ` (×${atk.kbScaling})`;
+                    stats += `   Angle: ${atk.angle}°`;
+                    stats += `   Startup: ${atk.startupFrames}f`;
+                    stats += `   Active: ${atk.activeFrames}f`;
+                    stats += `   Endlag: ${atk.endlagFrames}f`;
+                    ctx.fillText(stats, LEFT + 14, midY + 10);
+
+                    // Tags (right side)
+                    const tags = [];
+                    if (atk.spawnsProjectile) tags.push('Projectile');
+                    if (atk.isArmored)        tags.push(`Armor(${atk.armorHits})`);
+                    if (atk.isCounter)         tags.push('Counter');
+                    if (atk.chargesUlt)        tags.push(`Ult+${atk.chargesUlt}`);
+                    if (atk.makesSlippery)     tags.push('Slippery');
+                    if (atk.boostVX || atk.boostVY) tags.push('Movement');
+
+                    if (tags.length) {
+                        ctx.textAlign = 'right';
+                        ctx.font      = '12px Arial';
+                        ctx.fillStyle = '#88bbff';
+                        ctx.fillText(tags.join(' • '), LEFT + COL_W - 14, midY);
+                    }
+                }
+                curY += h;
+            }
+        }
+
+        ctx.restore(); // clip
+
+        // ── Scroll indicator ──────────────────────────────────────
+        if (maxScroll > 0) {
+            const barH   = Math.max(20, viewH * (viewH / totalH));
+            const barY   = PANEL_TOP + (this._mlScroll / maxScroll) * (viewH - barH);
+            ctx.fillStyle = 'rgba(255,255,255,0.15)';
+            ctx.beginPath();
+            ctx.roundRect(S.W - 22, barY, 8, barH, 4);
+            ctx.fill();
+        }
+
+        // ── Bottom hint ──────────────────────────────────────────
+        ctx.textAlign = 'center';
+        ctx.font      = '14px Arial';
+        ctx.fillStyle = '#555';
+        ctx.fillText('◀▶ Character   ▲▼ Scroll   Esc Back', S.W / 2, S.H - 14);
+
+        ctx.restore();
+    }
+
     // ── Game-over overlay ────────────────────────────────────────
 
     _renderGameOver(ctx) {
@@ -624,8 +1359,33 @@ class Game {
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
 
-        // Winner banner
-        if (this._winner) {
+        // ── Winner banner (mode-specific) ─────────────────────────
+        if (this.gameMode === 'wave') {
+            // Wave defense: show wave reached
+            ctx.font      = 'bold 60px Arial';
+            ctx.fillStyle = '#ff6644';
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur  = 14;
+            ctx.fillText('GAME OVER', S.W / 2, 65);
+            ctx.shadowBlur = 0;
+
+            ctx.font      = 'bold 30px Arial';
+            ctx.fillStyle = '#ffd700';
+            ctx.fillText(`Reached Wave ${this._waveNumber}`, S.W / 2, 110);
+
+            ctx.font      = '18px Arial';
+            ctx.fillStyle = '#aaa';
+            ctx.fillText(`Total Kills: ${this._waveKills}`, S.W / 2, 145);
+        } else if (this.gameMode === 'team' && this._winTeam >= 0) {
+            const teamNames  = ['TEAM A', 'TEAM B', 'TEAM C', 'TEAM D'];
+            const teamColors = ['#ff4444', '#4488ff', '#44dd44', '#ddaa22'];
+            ctx.font      = 'bold 72px Arial';
+            ctx.fillStyle = teamColors[this._winTeam] || '#fff';
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur  = 14;
+            ctx.fillText(`${teamNames[this._winTeam]} WINS!`, S.W / 2, 85);
+            ctx.shadowBlur = 0;
+        } else if (this._winner) {
             const c = S.P_COLORS[this._winner.port % 4];
             ctx.font      = 'bold 72px Arial';
             ctx.fillStyle = c;
@@ -649,8 +1409,10 @@ class Game {
         // Stats table
         this._renderStats(ctx, S.W / 2, 175);
 
-        // Menu options
-        this._renderMenu(ctx, GAMEOVER_OPTS, S.W / 2, S.H - 150);
+        // Menu options (hidden in multiplayer auto-exit mode)
+        if (!this._suppressGameOverMenu) {
+            this._renderMenu(ctx, GAMEOVER_OPTS, S.W / 2, S.H - 150);
+        }
 
         ctx.restore();
     }
@@ -658,7 +1420,12 @@ class Game {
     // ── Stats table ──────────────────────────────────────────────
 
     _renderStats(ctx, cx, topY) {
-        const ports = Object.keys(this._stats).map(Number).sort();
+        let ports = Object.keys(this._stats).map(Number).sort();
+        // In wave mode, only show human player stats
+        if (this.gameMode === 'wave') {
+            ports = ports.filter(p => p < 10);
+        }
+        if (ports.length === 0) return;
         const colW  = Math.min(220, (S.W - 80) / ports.length);
         const totalW = ports.length * colW;
         const sx = cx - totalW / 2;
@@ -737,6 +1504,298 @@ class Game {
         ctx.font      = '14px Arial';
         ctx.fillStyle = '#555';
         ctx.fillText('↑↓ Navigate  •  Enter Select', cx, topY + opts.length * 50 + 15);
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    //  STATE SYNCHRONIZATION (for multiplayer)
+    // ═════════════════════════════════════════════════════════════
+
+    /**
+     * Serialize critical game state for network sync.
+     * Called by host after each frame to send to guest.
+     */
+    serializeState() {
+        const fighters = this.fighters.map(f => ({
+            // Position / physics
+            x: f.x,
+            y: f.y,
+            vx: f.vx,
+            vy: f.vy,
+            facing: f.facing,
+            grounded: f.grounded,
+            fastFalling: f.fastFalling,
+
+            // State machine
+            state: f.state,
+            _stateTimer: f._stateTimer,
+
+            // Combat
+            damagePercent: f.damagePercent,
+            stocks: f.stocks,
+            invincible: f.invincible,
+            _invFrames: f._invFrames,
+            shieldHP: f.shieldHP,
+            ultimateMeter: f.ultimateMeter,
+            hitstunFrames: f.hitstunFrames,
+            jumpsRemaining: f.jumpsRemaining,
+
+            // Attack
+            currentAttack: f.currentAttack ? f.currentAttack.name : null,
+            _atkPhase: f._atkPhase,
+            _atkTimer: f._atkTimer,
+
+            // Grab
+            isGrabbed: f.isGrabbed,
+            grabTimer: f.grabTimer,
+
+            // Visual
+            inputDirection: f.inputDirection,
+            _armorHitsLeft: f._armorHitsLeft,
+
+            // Mode-specific
+            staminaHP: f.staminaHP || 0,
+            maxStaminaHP: f.maxStaminaHP || 0,
+            team: f.team != null ? f.team : -1,
+            isAlive: f.isAlive,
+            port: f.port,
+            width: f.width,
+            height: f.height,
+            charKey: f.data ? f.data.key : 'brawler',
+            isWaveEnemy: this._waveEnemies.includes(f),
+        }));
+
+        const projectiles = this.projMgr.list.map(p => ({
+            x: p.x,
+            y: p.y,
+            vx: p.vx,
+            vy: p.vy,
+            w: p.w,
+            h: p.h,
+            ownerPort: p.ownerPort,
+            color: p.color,
+            alive: p.alive,
+            rotation: p.rotation,
+            type: p.type,
+        }));
+
+        // Ultimate cutscene state
+        const um = this.ultMgr;
+        const ult = {
+            active: um.active,
+            phase: um.phase,
+            _timer: um._timer,
+            _attackerPort: um._attackerPort,
+            _isCombo: um._isCombo,
+            _comboName: um._comboName,
+            _comboDmgMult: um._comboDmgMult,
+            _videoError: um._videoError,
+            _fallbackElapsed: um._fallbackElapsed,
+            _videoPath: um._videoPath,
+            _ultDamage: um._ultData ? um._ultData.damage : 0,
+            _ultName: um._ultData ? um._ultData.name : '',
+            _attackerName: um._attacker ? um._attacker.data.name : '???',
+            _victims: (um._victims || []).map(v => ({
+                port: v.fighter.port,
+                distFactor: v.distFactor,
+            })),
+        };
+
+        return {
+            matchTime: this._matchTime,
+            state: this.state,
+            _countdownTimer: this._countdownTimer,
+            _koAlpha: this._koAlpha,
+            _koMsg: this._koMsg,
+            gameMode: this.gameMode,
+            _winner: this._winner ? this._winner.port : (this._winner === null ? null : this._winner),
+            _winTeam: this._winTeam,
+            _waveNumber: this._waveNumber || 0,
+            _waveEnemiesLeft: this._waveEnemies ? this._waveEnemies.filter(f => f.isAlive).length : 0,
+            _waveSpawned: this._waveSpawned || 0,
+            _waveTargetCount: this._waveTargetCount || 0,
+            fighterCount: this.fighters.length,
+            fighters,
+            projectiles,
+            ult,
+        };
+    }
+
+    /**
+     * Apply received state from host to local game objects.
+     * Called by guest each frame when state arrives.
+     */
+    applyState(netState) {
+        if (!netState) return;
+
+        this._matchTime = netState.matchTime;
+        this.state = netState.state;
+        this._countdownTimer = netState._countdownTimer;
+        this._koAlpha = netState._koAlpha || 0;
+        this._koMsg = netState._koMsg || '';
+        if (netState._waveNumber != null) this._waveNumber = netState._waveNumber;
+        if (netState._waveEnemiesLeft != null) this._waveEnemiesLeft = netState._waveEnemiesLeft;
+        if (netState._waveSpawned != null) this._waveSpawned = netState._waveSpawned;
+        if (netState._waveTargetCount != null) this._waveTargetCount = netState._waveTargetCount;
+
+        // Dynamically grow/shrink fighter list to match host (wave mode spawns enemies)
+        while (this.fighters.length < netState.fighters.length) {
+            const src = netState.fighters[this.fighters.length];
+            const charKey = src.charKey || 'brawler';
+            const data = new SMASH.FighterData(charKey);
+            const fighter = new SMASH.Fighter(src.port, data, src.x, src.y);
+            fighter._isGhostCopy = true; // mark as guest-side copy
+            this.fighters.push(fighter);
+            // Also add to players for HUD rendering
+            this.players.push({
+                port: src.port, fighter, controller: { poll() { return new SMASH.InputState(); } },
+                isAI: true, isWaveEnemy: !!src.isWaveEnemy, characterKey: charKey,
+            });
+        }
+        // Shrink if host removed fighters (wave cleanup)
+        while (this.fighters.length > netState.fighters.length) {
+            const removed = this.fighters.pop();
+            this.players = this.players.filter(p => p.fighter !== removed);
+        }
+
+        // Track wave enemies on guest side
+        this._waveEnemies = this.fighters.filter((f, i) => {
+            return netState.fighters[i] && netState.fighters[i].isWaveEnemy;
+        });
+
+        // Update fighters
+        for (let i = 0; i < netState.fighters.length && i < this.fighters.length; i++) {
+            const src = netState.fighters[i];
+            const dst = this.fighters[i];
+
+            // Position / physics
+            dst.x = src.x;
+            dst.y = src.y;
+            dst.vx = src.vx;
+            dst.vy = src.vy;
+            dst.facing = src.facing;
+            dst.grounded = src.grounded;
+            dst.fastFalling = src.fastFalling;
+
+            // State machine
+            dst.state = src.state;
+            dst._stateTimer = src._stateTimer;
+
+            // Combat
+            dst.damagePercent = src.damagePercent;
+            dst.stocks = src.stocks;
+            dst.invincible = src.invincible;
+            dst._invFrames = src._invFrames;
+            dst.shieldHP = src.shieldHP;
+            dst.ultimateMeter = src.ultimateMeter;
+            dst.hitstunFrames = src.hitstunFrames;
+            dst.jumpsRemaining = src.jumpsRemaining;
+
+            // Attack
+            dst._atkPhase = src._atkPhase;
+            dst._atkTimer = src._atkTimer;
+            if (src.currentAttack) {
+                if (!dst.currentAttack || dst.currentAttack.name !== src.currentAttack) {
+                    dst.currentAttack = dst.data.attacks[src.currentAttack] || null;
+                }
+            } else {
+                dst.currentAttack = null;
+            }
+
+            // Grab
+            dst.isGrabbed = src.isGrabbed;
+            dst.grabTimer = src.grabTimer;
+
+            // Visual
+            dst.inputDirection = src.inputDirection || { x: 0, y: 0 };
+            dst._armorHitsLeft = src._armorHitsLeft || 0;
+
+            // Mode-specific
+            if (src.staminaHP != null) dst.staminaHP = src.staminaHP;
+            if (src.maxStaminaHP != null) dst.maxStaminaHP = src.maxStaminaHP;
+            if (src.team != null) dst.team = src.team;
+            // Sync stocks to 0 for dead fighters so isAlive returns false
+            dst.stocks = src.stocks;
+        }
+
+        // Game-level mode state
+        if (netState._winTeam != null) this._winTeam = netState._winTeam;
+        // Reconstruct _winner as fighter reference from port number
+        if (netState._winner != null) {
+            this._winner = this.fighters.find(f => f.port === netState._winner) || null;
+        } else {
+            this._winner = null;
+        }
+
+        // Update ultimate cutscene state
+        if (netState.ult) {
+            const u = netState.ult;
+            const um = this.ultMgr;
+
+            // If host's ultimate just became active, start video on guest
+            const wasActive = um.active;
+            um.active = u.active;
+            um.phase  = u.phase;
+            um._timer = u._timer;
+            um._attackerPort    = u._attackerPort;
+            um._isCombo         = u._isCombo;
+            um._comboName       = u._comboName;
+            um._comboDmgMult    = u._comboDmgMult || 1;
+            um._fallbackElapsed = u._fallbackElapsed;
+            um._videoPath       = u._videoPath;
+
+            // Always use canvas fallback on guest (video sync is unreliable)
+            um._videoError = true;
+
+            // Reconstruct _ultData stub for damage display & fallback name
+            um._ultData = { damage: u._ultDamage || 0, name: u._ultName || 'ULTIMATE' };
+
+            // Reconstruct _attacker stub for fallback render (needs .data.name)
+            um._attacker = u._attackerPort >= 0
+                ? { data: { name: u._attackerName || '???' } }
+                : null;
+
+            // Reconstruct victims from fighter refs
+            um._victims = (u._victims || []).map(v => ({
+                fighter: this.fighters[v.port] || { port: v.port },
+                distFactor: v.distFactor,
+            }));
+
+            // If host just became active and guest wasn't → start the fallback
+            // (hide any lingering video element)
+            if (u.active && !wasActive) {
+                um._hideVideo();
+            }
+            // If host ended → clean up video element
+            if (!u.active && wasActive) {
+                um._hideVideo();
+            }
+        }
+
+        // Update projectiles — replace the entire list
+        this.projMgr.list.length = 0;
+        for (const p of netState.projectiles) {
+            // Create minimal projectile-like objects for rendering
+            this.projMgr.list.push({
+                x: p.x,
+                y: p.y,
+                vx: p.vx,
+                vy: p.vy,
+                w: p.w || 22,
+                h: p.h || 22,
+                ownerPort: p.ownerPort,
+                color: p.color,
+                alive: p.alive !== false,
+                rotation: p.rotation || 0,
+                type: p.type || 'linear',
+                _trail: [],
+                render: SMASH.Projectile.prototype.render,
+                _renderTrail: SMASH.Projectile.prototype._renderTrail,
+                _renderBody: SMASH.Projectile.prototype._renderBody,
+                _renderDebugHitbox: SMASH.Projectile.prototype._renderDebugHitbox || function(){},
+                trailLength: 0,
+                hitbox: null,
+            });
+        }
     }
 }
 
