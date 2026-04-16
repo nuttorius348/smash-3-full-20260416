@@ -267,11 +267,24 @@ class Projectile {
         for (const f of fighters) {
             if (f.port === this.ownerPort || !f.isAlive) continue;
             if (f.invincible) continue;
+            // Team-based friendly fire prevention
+            const owner = fighters.find(o => o.port === this.ownerPort);
+            if (owner && owner.team >= 0 && f.team >= 0 && owner.team === f.team) continue;
             if (this.hitbox.checkHitAt(this.x, this.y, this.w, this.h, this.facing, f)) {
                 f._lastHitBy = this.ownerPort;
                 // Projectiles spawned by specials count as special hits
                 f.takeHit(this.hitbox, this.facing, true);
                 this._hitCount++;
+
+                // Decrement owner's boosted-hit counter (Fazbear multiplier)
+                const owner = fighters.find(o => o.port === this.ownerPort);
+                if (owner && owner.boostedHitsLeft > 0) {
+                    owner.boostedHitsLeft--;
+                    if (owner.boostedHitsLeft <= 0) {
+                        owner.damageMultiplier = 1.0;
+                    }
+                }
+
                 this.onHit(f);
                 if (!this.alive) return;
             }
@@ -854,6 +867,9 @@ class ProjectileManager {
         const type = atk.projectileType || 'linear';
         const Cls  = TYPE_MAP[type] || LinearProjectile;
 
+        // Apply fighter's damage multiplier (e.g. Fazbear's stacking boost)
+        const mult = fighter.damageMultiplier || 1.0;
+
         this.spawn(new Cls({
             ownerPort:      fighter.port,
             x: sx, y: sy,
@@ -862,8 +878,8 @@ class ProjectileManager {
             h:              atk.projH || 22,
             radius:         atk.projR || Math.max(atk.projW || 22, atk.projH || 22) / 2,
             shape:          atk.projShape || 'circle',
-            damage:         atk.projDamage   || atk.damage,
-            baseKB:         atk.projKB       || 150,
+            damage:         (atk.projDamage   || atk.damage) * mult,
+            baseKB:         (atk.projKB       || 150) * mult,
             kbScaling:      atk.projKBScaling || atk.kbScaling || 0.7,
             angle:          atk.projAngle    || 30,
             lifetime:       atk.projLifetime || 100,
@@ -877,8 +893,8 @@ class ProjectileManager {
             color:          atk.projColor,
             groundSnap:     atk.projGroundSnap || false,
             explosionRadius: atk.projExplosionRadius,
-            explosionDamage: atk.projExplosionDamage,
-            explosionKB:     atk.projExplosionKB,
+            explosionDamage: atk.projExplosionDamage ? atk.projExplosionDamage * mult : undefined,
+            explosionKB:     atk.projExplosionKB ? atk.projExplosionKB * mult : undefined,
             explosionLife:   atk.projExplosionLife,
             gravScale:       atk.projGravity,
         }));

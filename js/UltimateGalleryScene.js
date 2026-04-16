@@ -26,8 +26,33 @@ class UltimateGalleryScene {
                 video: r.ultimateAttack ? r.ultimateAttack.cutsceneVideo : null,
                 ultName: r.ultimateAttack ? r.ultimateAttack.name : 'Unknown',
                 data: fd,
+                isCombo: false,
             };
         });
+
+        // Add combo ultimates
+        const comboUltimates = [
+            { name: 'Netanyahu + Trump', video: 'assets/ultimate_netanyahutrump.mp4', color: '#ffd700', ultName: 'Middle East Domination' },
+            { name: 'Diddy + Epstein',   video: 'assets/ultimate_epsteindiddy.mp4',   color: '#ffd700', ultName: 'Island Secrets' },
+            { name: 'Metabot + Droid',   video: 'assets/ultimate_droidmetabot.mp4',   color: '#ffd700', ultName: 'AI Overload' },
+            { name: 'Bomber + Aru',      video: 'assets/ultimate_bomberaru.mp4',      color: '#ffd700', ultName: 'Late Defuser' },
+            { name: 'Frankie + Slaveish',video: 'assets/ultimate_frankieslaveish.mp4',color: '#ffd700', ultName: 'Vibe Code Supreme' },
+            { name: 'Fazbear + Lazer',   video: 'assets/ultimate_fazbearlazer.mp4',   color: '#ffd700', ultName: 'Super Saiyan Sumpreme' },
+            { name: 'Nutsak + Kirky',    video: 'assets/ultimate_kirkynutsak.mp4',    color: '#ffd700', ultName: 'Turning Point Debate' },
+            { name: 'Kiddo + Speed',     video: 'assets/ultimate_kiddospeed.mp4',     color: '#ffd700', ultName: 'Brainrot Overload' },
+        ];
+
+        for (const combo of comboUltimates) {
+            this.characters.push({
+                key: combo.name.toLowerCase().replace(/\s+/g, '_'),
+                name: combo.name,
+                color: combo.color,
+                video: combo.video,
+                ultName: combo.ultName,
+                data: null,  // no sprite for combos
+                isCombo: true,
+            });
+        }
 
         this.selected = 0;       // cursor index
         this._playing = false;   // true while a video is active
@@ -210,14 +235,14 @@ class UltimateGalleryScene {
     // ══════════════════════════════════════════════════════════════
     //  Layout helpers
     // ══════════════════════════════════════════════════════════════
-    _cols() { return 4; }
+    _cols() { return 8; }
 
     _cardRects() {
         const cols   = this._cols();
-        const cardW  = 200;
-        const cardH  = 200;
-        const gap    = 24;
-        const startY = 120;
+        const cardW  = 135;
+        const cardH  = 135;
+        const gap    = 12;
+        const startY = 115;
         const rects  = [];
 
         for (let i = 0; i < this.characters.length; i++) {
@@ -282,7 +307,20 @@ class UltimateGalleryScene {
 
             // Sprite
             const sprH = r.h - 70;
-            if (ch.data && ch.data.spriteLoaded && ch.data.spriteImage) {
+            if (ch.isCombo) {
+                // Combo ultimate badge
+                ctx.save();
+                ctx.fillStyle = 'rgba(255,215,0,0.15)';
+                ctx.fillRect(r.x + 10, r.y + 12, r.w - 20, sprH);
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = 'bold 32px Arial';
+                ctx.fillStyle = '#ffd700';
+                ctx.shadowColor = '#000';
+                ctx.shadowBlur = 8;
+                ctx.fillText('⚡', r.x + r.w / 2, r.y + sprH / 2 + 6);
+                ctx.restore();
+            } else if (ch.data && ch.data.spriteLoaded && ch.data.spriteImage) {
                 ctx.drawImage(ch.data.spriteImage, r.x + 20, r.y + 12, r.w - 40, sprH);
             } else {
                 ctx.fillStyle = 'rgba(255,255,255,0.05)';

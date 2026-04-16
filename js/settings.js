@@ -67,6 +67,10 @@ SMASH.Settings = {
     // Pogo bounce
     POGO_BOUNCE_VY:     -700,  // upward velocity when pogo-bouncing off someone
 
+    // Slippery debuff (Baby Oil)
+    SLIPPERY_DURATION_FRAMES: 300,  // 5 seconds at 60fps
+    SLIPPERY_FRICTION_MULT:   0.15, // ground friction multiplier when slippery
+
     // Focus / Super-armor absorb
     FOCUS_ARMOR_HITS:   1,      // hits absorbed during focus startup
     FOCUS_ARMOR_HITS_CHARGED: 2,

@@ -110,6 +110,28 @@ class Fighter {
         this.grabTimer = 0;          // frames spent in grab state
         this.grabbedEscapeTimer = 0; // frames spent being grabbed (auto-escape)
         this._grabHitsReceived = 0;  // pummel hits received (for display)
+
+        // Slippery debuff
+        this.slipperyTimer = 0;      // frames remaining of slippery effect
+
+        // Damage multiplier (for Fazbear's stacking ultimate)
+        this.damageMultiplier = 1.0;
+        this.boostedHitsLeft = 0;  // hits remaining before multiplier resets
+
+        // Vaughan-specific evolution state
+        this._ultimatesUsed = 0;
+        this._vaughanVonForm = false;
+        this._pendingVaughanTransformCutscene = false;
+
+        // Stamina mode
+        this.staminaHP    = 0;   // 0 = not stamina mode
+        this.maxStaminaHP = 0;
+
+        // Team assignment (-1 = no team, 0 = red, 1 = blue)
+        this.team = -1;
+
+        // Last-hit metadata for KO SFX routing
+        this._lastHitWasSpecial = false;
     }
 
     // ── Properties ───────────────────────────────────────────────
@@ -129,6 +151,9 @@ class Fighter {
             this._invFrames--;
             this.invincible = this._invFrames > 0;
         }
+
+        // Slippery countdown
+        if (this.slipperyTimer > 0) this.slipperyTimer--;
 
         // Shield regen when not shielding
         if (this.state !== ST.SHIELD && this.state !== ST.SHIELD_STUN) {
@@ -331,6 +356,14 @@ class Fighter {
             try { new Audio(atk.soundEffect).play(); } catch(_) {}
         }
 
+        if (isSpecial && SMASH.SFX) {
+            if (key === 'down_special') SMASH.SFX.playDownSpecial();
+            if (key === 'up_special') SMASH.SFX.playUpSpecial();
+            if (this.data.key === 'trump' && key === 'neutral_special') {
+                SMASH.SFX.playTrump();
+            }
+        }
+
         return null;
     }
 
@@ -354,6 +387,18 @@ class Fighter {
                 this._atkPhase = 'active';
                 this._atkTimer = this.currentAttack.activeFrames;
                 this.activeHitbox = Hitbox.fromAttack(this.port, this.currentAttack);
+
+                // Apply damage multiplier (for Fazbear's stacking ultimate)
+                if (this.activeHitbox && this.damageMultiplier !== 1.0) {
+                    this.activeHitbox.damage *= this.damageMultiplier;
+                    this.activeHitbox.baseKB *= this.damageMultiplier;
+                }
+
+                // Vaughan's Von form boosts only normal + special attacks.
+                if (this.activeHitbox && this._vaughanVonForm && this.state !== ST.ULTIMATE) {
+                    this.activeHitbox.damage *= 5;
+                    this.activeHitbox.baseKB *= 5;
+                }
 
                 // Counter: boost damage with stored absorbed damage
                 if (this.currentAttack.isCounter && this._focusDamageStored > 0 && this.activeHitbox) {
@@ -396,6 +441,11 @@ class Fighter {
     _endAttack() {
         const wasUpB = this.currentAttack &&
             this.currentAttack === this.data.attacks['up_special'];
+
+        // Apply damage boost from ultimate (e.g. Fazbear's stacking boost)
+        if (this.state === ST.ULTIMATE && this.currentAttack && this.currentAttack.damageBoostMultiplier) {
+            this.damageMultiplier *= this.currentAttack.damageBoostMultiplier;
+        }
 
         this.currentAttack = null;
         this.activeHitbox  = null;
@@ -683,6 +733,11 @@ class Fighter {
     // Hit reception
     // ──────────────────────────────────────────────────────────────
     takeHit(hitbox, attackerFacing, isSpecialHit, isUltimateHit) {
+        // Play hit + character-specific hurt SFX
+        if (SMASH.SFX) SMASH.SFX.playHit(this.data.key);
+
+        this._lastHitWasSpecial = !!isSpecialHit && !isUltimateHit;
+
         // ── Release grab if we're grabbing someone ───────────────
         if (this.state === ST.GRABBING && this.grabTarget) {
             this._releaseGrab();
@@ -714,7 +769,29 @@ class Fighter {
 
         // ── Normal hit ───────────────────────────────────────────
         this.damagePercent += hitbox.damage;
-        this._chargeUlt(hitbox.damage);        
+        this._chargeUlt(hitbox.damage);
+
+        // ── Stamina mode: reduce HP, die at 0 ───────────────────
+        if (this.maxStaminaHP > 0) {
+            this.staminaHP = Math.max(0, this.staminaHP - hitbox.damage);
+
+            // Small fixed knockback (flinch) instead of scaling KB
+            const flinchKB = Math.min(180, hitbox.baseKB * 0.35);
+            const angleDeg = hitbox.getLaunchAngle(attackerFacing);
+            const angleRad = angleDeg * Math.PI / 180;
+            this.vx = Math.cos(angleRad) * flinchKB;
+            this.vy = -Math.sin(angleRad) * flinchKB;
+
+            this.hitstunFrames = Math.min(15, Math.floor(flinchKB * S.KB_HITSTUN_FACTOR));
+            this.state = ST.HITSTUN;
+            this.currentAttack = null;
+            this.activeHitbox  = null;
+            this._armorHitsLeft = 0;
+
+            if (this.staminaHP <= 0) this.die();
+            return;
+        }
+
         // Track consecutive hits
         this._consecutiveHits++;
         this._stunDecayTimer = 0;
@@ -781,7 +858,38 @@ class Fighter {
 
     _chargeUlt(dmg) {
         if (this.damagePercent >= S.ULT_CHARGE_CAP) return;
+        const prev = this.ultimateMeter;
         this.ultimateMeter = Math.min(S.ULT_MAX, this.ultimateMeter + dmg * S.DMG_TO_METER);
+        if (prev < S.ULT_MAX && this.ultimateMeter >= S.ULT_MAX && SMASH.SFX) {
+            SMASH.SFX.playUltimateReady();
+        }
+    }
+
+    _activateVaughanVonForm() {
+        this._vaughanVonForm = true;
+        this.data.idleSprite = 'assets/sprite_vaughan2.jpg';
+        this.data.spriteLoaded = false;
+        this.data.spriteImage = new Image();
+        this.data.spriteImage.onload = () => { this.data.spriteLoaded = true; };
+        this.data.spriteImage.onerror = () => {
+            console.warn('Failed to load sprite: assets/sprite_vaughan2.jpg');
+            this.data.spriteLoaded = false;
+        };
+        this.data.spriteImage.src = this.data.idleSprite;
+    }
+
+    consumeVaughanTransformCutsceneEvent() {
+        if (!this._pendingVaughanTransformCutscene) return false;
+        this._pendingVaughanTransformCutscene = false;
+        return true;
+    }
+
+    notifyUltimateResolved() {
+        this._ultimatesUsed++;
+        if (this.data.key === 'vaughan' && this._ultimatesUsed >= 2 && !this._vaughanVonForm) {
+            this._activateVaughanVonForm();
+            this._pendingVaughanTransformCutscene = true;
+        }
     }
 
     // ── Knockback formula ────────────────────────────────────────
@@ -807,6 +915,7 @@ class Fighter {
         this.y  = this._spawnY - 200;
         this.vx = 0; this.vy = 0;
         this.damagePercent = 0;
+        if (this.maxStaminaHP > 0) this.staminaHP = this.maxStaminaHP;
         this.state = ST.AIRBORNE;
         this.invincible  = true;
         this._invFrames  = S.RESPAWN_INV_FRAMES;
@@ -827,6 +936,7 @@ class Fighter {
         this.grabTarget = null;
         this.grabHitsDealt = 0;
         this.grabTimer = 0;
+        this._lastHitWasSpecial = false;
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -932,6 +1042,19 @@ class Fighter {
             ctx.shadowColor = '#ff8800';
             ctx.shadowBlur = 10 * cam.zoom;
             ctx.strokeRect(sx - 2, sy - 2, sw + 4, sh + 4);
+            ctx.shadowBlur = 0;
+        }
+
+        // Ultimate ready glow
+        if (this.ultimateMeter >= S.ULT_MAX) {
+            const t = performance.now() / 400;
+            const pulse = 0.55 + 0.45 * Math.sin(t);
+            const glowSize = (8 + 6 * pulse) * cam.zoom;
+            ctx.shadowColor = `rgba(255,215,0,${0.7 + 0.3 * pulse})`;
+            ctx.shadowBlur = glowSize;
+            ctx.strokeStyle = `rgba(255,215,0,${0.5 + 0.5 * pulse})`;
+            ctx.lineWidth = (2 + pulse) * cam.zoom;
+            ctx.strokeRect(sx - 3, sy - 3, sw + 6, sh + 6);
             ctx.shadowBlur = 0;
         }
 

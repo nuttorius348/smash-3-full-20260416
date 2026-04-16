@@ -42,12 +42,30 @@ const FLASH_IN_DURATION   = 0.35;  // white flash fade-in  (seconds)
 const FLASH_OUT_DURATION  = 0.3;   // white flash fade-out (seconds)
 const POST_RESOLVE_PAUSE  = 0.4;   // brief freeze after damage applied
 
+// ── Combo Ultimate pairs (sorted keys) ───────────────────────────
+const COMBO_ULTIMATES = {
+    'netanyahu+trump':   { video: 'assets/ultimate_netanyahutrump.mp4', name: 'Middle East Domination' },
+    'diddy+epstein':     { video: 'assets/ultimate_epsteindiddy.mp4',   name: 'Island Secrets' },
+    'droid+metabot':     { video: 'assets/ultimate_droidmetabot.mp4',   name: 'AI Overload' },
+    'aru+bomber':        { video: 'assets/ultimate_bomberaru.mp4',      name: 'Late Defuser' },
+    'grappler+zoner':    { video: 'assets/ultimate_frankieslaveish.mp4',name: 'Vibe Code Supreme' },
+    'brawler+fazbear':   { video: 'assets/ultimate_fazbearlazer.mp4',   name: 'Super Saiyan Sumpreme' },
+    'kirky+speedster':   { video: 'assets/ultimate_kirkynutsak.mp4',    name: 'Turning Point Debate' },
+    'kiddo+speed':       { video: 'assets/ultimate_kiddospeed.mp4',     name: 'Brainrot Overload' },
+};
+
+function _getComboKey(keyA, keyB) {
+    return [keyA, keyB].sort().join('+');
+}
+
 // ══════════════════════════════════════════════════════════════════
 //  UltimateManager
 // ══════════════════════════════════════════════════════════════════
 
 class UltimateManager {
     constructor() {
+        this._videosEnabled = true;
+
         // ── State ────────────────────────────────────────────────
         this.active       = false;   // true while cutscene is running
         this.phase        = 'idle';  // idle | flash_in | video | flash_out | resolve | done
@@ -59,6 +77,9 @@ class UltimateManager {
         this._ultData      = null;   // ultimateAttack object
         this._victims      = [];     // { fighter, distFactor }
         this._videoPath    = null;
+        this._isCombo      = false;  // combo ultimate active?
+        this._comboDmgMult = 1;      // 4x for combo ultimates
+        this._comboName    = null;   // combo ultimate name
 
         // ── Video element (created once, reused) ─────────────────
         this._videoEl = null;
@@ -68,6 +89,10 @@ class UltimateManager {
 
         // ── Fallback canvas anim ─────────────────────────────────
         this._fallbackElapsed = 0;
+    }
+
+    setVideoEnabled(enabled) {
+        this._videosEnabled = enabled !== false;
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -152,18 +177,52 @@ class UltimateManager {
     trigger(attacker, allFighters) {
         if (this.active) return; // only one at a time
 
-        this.active        = true;
         this._attackerPort = attacker.port;
         this._attacker     = attacker;
         this._ultData      = attacker.data.ultimateAttack;
 
-        // ── Detect victims ───────────────────────────────────────
-        this._victims = this._detectVictims(attacker, allFighters);
+        // ── Check for combo ultimate (team mode) ─────────────────
+        this._isCombo      = false;
+        this._comboDmgMult = 1;
+        this._comboName    = null;
+        const attackerKey  = attacker.data.key;
+        if (attacker.team >= 0 && attackerKey) {
+            for (const f of allFighters) {
+                if (f === attacker || !f.isAlive) continue;
+                if (f.team !== attacker.team) continue;
+                const partnerKey = f.data.key;
+                if (!partnerKey) continue;
+                const comboKey = _getComboKey(attackerKey, partnerKey);
+                const comboData = COMBO_ULTIMATES[comboKey];
+                if (comboData) {
+                    this._isCombo      = true;
+                    this._comboDmgMult = 4;
+                    this._videoPath    = comboData.video;
+                    this._comboName    = comboData.name;
+                    break;
+                }
+            }
+        }
 
-        // ── Resolve video path ───────────────────────────────────
-        this._videoPath = this._ultData.cutsceneVideo || null;
+        // ── Detect victims ───────────────────────────────────────
+        // Combo ultimates hit ALL enemies, normal ultimates use cone detection
+        this._victims = this._detectVictims(attacker, allFighters, this._isCombo);
+
+        // ── Resolve video path (combo overrides individual) ──────
+        if (!this._isCombo) {
+            this._videoPath = this._ultData.cutsceneVideo || null;
+        }
         this._videoError = false;
         this._fallbackElapsed = 0;
+
+        // Videos disabled: apply ultimate immediately and continue gameplay.
+        if (!this._videosEnabled) {
+            this._applyDamage();
+            this._finish();
+            return;
+        }
+
+        this.active = true;
 
         // ── Begin flash-in ───────────────────────────────────────
         this.phase  = 'flash_in';
@@ -280,7 +339,10 @@ class UltimateManager {
                 ctx.fillStyle = '#fff';
                 ctx.shadowColor = '#000';
                 ctx.shadowBlur = 12;
-                ctx.fillText(`P${this._attackerPort + 1} ULTIMATE!`, S.W / 2, S.H / 2 - 50);
+                const ultLabel = this._isCombo
+                    ? `P${this._attackerPort + 1} COMBO ULTIMATE!`
+                    : `P${this._attackerPort + 1} ULTIMATE!`;
+                ctx.fillText(ultLabel, S.W / 2, S.H / 2 - 50);
 
                 // Damage numbers per victim
                 ctx.font = 'bold 36px Arial';
@@ -316,10 +378,13 @@ class UltimateManager {
      *   │     ULT_DETECT_HALF_H│ ← vertical extent
      *   └───────────────────────┘
      *
+     * For combo ultimates, all enemies are detected regardless of position.
+     *
+     * @param {boolean} [isCombo=false] — if true, detect ALL enemies
      * @returns {Array<{fighter, distFactor}>}
      *   distFactor: 0=point blank, 1=max range (scales damage falloff)
      */
-    _detectVictims(attacker, allFighters) {
+    _detectVictims(attacker, allFighters, isCombo = false) {
         const victims = [];
         const ax = attacker.x + attacker.width / 2;  // attacker center X
         const ay = attacker.y + attacker.height / 2;  // attacker center Y
@@ -329,6 +394,14 @@ class UltimateManager {
             if (f === attacker) continue;
             if (!f.isAlive) continue;
             if (f.invincible) continue;
+            // Skip teammates
+            if (attacker.team >= 0 && f.team >= 0 && attacker.team === f.team) continue;
+
+            // Combo ultimate: hit ALL enemies
+            if (isCombo) {
+                victims.push({ fighter: f, distFactor: 0 });  // full damage, no falloff
+                continue;
+            }
 
             const fx = f.x + f.width / 2;
             const fy = f.y + f.height / 2;
@@ -361,7 +434,7 @@ class UltimateManager {
     _getVictimDamage(victim) {
         // Full damage at close range, 60% at max range
         const falloff = 1.0 - victim.distFactor * 0.4;
-        return this._ultData.damage * falloff;
+        return this._ultData.damage * falloff * this._comboDmgMult;
     }
 
     _applyDamage() {
@@ -422,6 +495,16 @@ class UltimateManager {
     _finish() {
         // Clean up attacker state
         if (this._attacker) {
+            // Apply damage boost multiplier (e.g. Fazbear's stacking 10x)
+            if (this._ultData && this._ultData.damageBoostMultiplier) {
+                this._attacker.damageMultiplier *= this._ultData.damageBoostMultiplier;
+                this._attacker.boostedHitsLeft = 2;
+            }
+
+            if (this._attacker.notifyUltimateResolved) {
+                this._attacker.notifyUltimateResolved();
+            }
+
             this._attacker.currentAttack = null;
             this._attacker.activeHitbox  = null;
             this._attacker.state = this._attacker.grounded ? ST.IDLE : ST.AIRBORNE;
@@ -433,6 +516,9 @@ class UltimateManager {
         this._ultData  = null;
         this._victims  = [];
         this._attackerPort = -1;
+        this._isCombo      = false;
+        this._comboDmgMult = 1;
+        this._comboName    = null;
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -502,7 +588,9 @@ class UltimateManager {
         );
 
         // ── Ultimate name ────────────────────────────────────────
-        const ultName = this._ultData ? this._ultData.name : 'ULTIMATE';
+        const ultName = this._isCombo && this._comboName
+            ? this._comboName
+            : (this._ultData ? this._ultData.name : 'ULTIMATE');
         const scale = 1.0 + Math.sin(t * 4) * 0.05;
 
         ctx.save();
@@ -516,6 +604,17 @@ class UltimateManager {
         ctx.shadowBlur = 20;
         ctx.fillText(ultName.toUpperCase(), 0, 0);
         ctx.restore();
+
+        // ── Combo badge ──────────────────────────────────────────
+        if (this._isCombo) {
+            ctx.font = 'bold 28px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#ffd700';
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur = 10;
+            ctx.fillText('⚡ COMBO ULTIMATE ⚡', cx, cy + charH / 2 + 90);
+            ctx.shadowBlur = 0;
+        }
 
         // ── Player label ─────────────────────────────────────────
         ctx.font = 'bold 32px Arial';

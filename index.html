@@ -13,12 +13,33 @@
 <!-- ═══════════════════════════════════════════════════════════════ -->
 <canvas id="gameCanvas" width="1280" height="720"></canvas>
 
+<!-- Tournament match overlay (hidden by default) -->
+<div id="tournamentHint" style="display:none; position:fixed; top:8px; right:12px;
+     background:rgba(0,0,0,0.7); color:#ffd700; font:bold 14px Arial;
+     padding:6px 14px; border-radius:6px; pointer-events:none; z-index:100;
+     border:1px solid rgba(255,215,0,0.4);">
+    TAB — Skip Match &nbsp;|&nbsp; ESC — Pause
+</div>
+
 <!-- ═══════════════════════════════════════════════════════════════ -->
 <!--  MAIN MENU OVERLAY                                            -->
 <!-- ═══════════════════════════════════════════════════════════════ -->
 <div id="menu" class="overlay">
 
     <h1>SMASH 3</h1>
+
+    <!-- Game Mode -->
+    <div class="menu-section">
+        <h2>Game Mode</h2>
+        <select id="gameModeSelect">
+            <option value="stock">Stock</option>
+            <option value="stamina">Stamina</option>
+            <option value="team">Team Battle</option>
+            <option value="wave">Wave Defense</option>
+            <option value="draft">Draft</option>
+            <option value="tournament">Tournament</option>
+        </select>
+    </div>
 
     <!-- Stage select -->
     <div class="menu-section">
@@ -39,16 +60,29 @@
             <input type="number" id="stockCount" value="3" min="1" max="99"
                    style="width:52px">
         </label>
+        <label style="margin-left:20px">Stamina HP:
+            <input type="number" id="staminaHP" value="150" min="50" max="999"
+                   style="width:60px">
+        </label>
         <label style="margin-left:20px">
             <input type="checkbox" id="debugToggle"> Debug Hitboxes
+        </label>
+        <label style="margin-left:20px">
+            <input type="checkbox" id="ultimateVideosToggle" checked> Ultimate Videos
         </label>
     </div>
 
     <!-- FIGHT button -->
     <button id="startBtn" class="start-btn">FIGHT!</button>
 
+    <!-- Multiplayer button -->
+    <button id="multiplayerBtn" class="gallery-btn" style="margin-bottom:8px">MULTIPLAYER</button>
+
     <!-- Ultimate Gallery button -->
     <button id="galleryBtn" class="gallery-btn">ULTIMATE GALLERY</button>
+
+    <!-- Tier List button -->
+    <button id="tierListBtn" class="gallery-btn" style="margin-top:8px">TIER LIST</button>
 
     <!-- Controls reference -->
     <div class="controls-help">
@@ -99,6 +133,8 @@
 
 <!-- 1. Core -->
 <script src="js/settings.js"></script>
+<script src="js/MusicManager.js"></script>
+<script src="js/SFXManager.js"></script>
 <script src="js/Hitbox.js"></script>
 
 <!-- 2. Data -->
@@ -120,12 +156,17 @@
 <script src="js/KeyboardController.js"></script>
 <script src="js/GamepadController.js"></script>
 <script src="js/AIController.js"></script>
+<script src="js/NetworkController.js"></script>
 
 <!-- 6. UI / Systems -->
 <script src="js/HUD.js"></script>
 <script src="js/UltimateManager.js"></script>
 <script src="js/CharacterSelectScene.js"></script>
 <script src="js/UltimateGalleryScene.js"></script>
+<script src="js/TierListScene.js"></script>
+<script src="js/DraftScene.js"></script>
+<script src="js/TournamentScene.js"></script>
+<script src="js/MultiplayerScene.js"></script>
 
 <!-- 7. Game + Entry -->
 <script src="js/Game.js"></script>

@@ -45,6 +45,7 @@ class PlayerSlot {
         this.aiDifficulty = 5;
         this.deviceId = null;
         this.ready = false;
+        this.team = port % 2;  // 0=A, 1=B, 2=C, 3=D  (default: alternating A/B)
 
         // Device assignment
         this.selectedDeviceIdx = port;  // default: port 0→wasd, 1→arrows, 2→ijkl, 3→wasd
@@ -88,6 +89,11 @@ class PlayerSlot {
         this.aiDifficulty = Math.max(1, Math.min(10, this.aiDifficulty + delta));
     }
 
+    cycleTeam(dir) {
+        if (this.ready) return;
+        this.team = ((this.team + dir) % 4 + 4) % 4;  // 0-3 wrap
+    }
+
     toggleReady() {
         if (!this.active) return false;
         this.ready = !this.ready;
@@ -107,13 +113,14 @@ class PlayerSlot {
         return deviceList[idx] ? deviceList[idx].name : 'Keyboard (WASD)';
     }
 
-    getConfig(deviceList) {
+    getConfig(deviceList, gameMode) {
         if (this.controllerType === 'ai') {
             return {
                 port: this.port,
                 character: this.characterKey,
                 type: 'ai',
                 level: this.aiDifficulty,
+                team: gameMode === 'team' ? this.team : -1,
             };
         } else {
             // Human player — use selected device
@@ -125,6 +132,7 @@ class PlayerSlot {
                 return {
                     port: this.port,
                     character: this.characterKey,
+                    team: gameMode === 'team' ? this.team : -1,
                     deviceConfig: {
                         type: device.controllerType || SMASH.CONTROLLER_TYPES.XBOX,
                         index: device.index,
@@ -136,6 +144,7 @@ class PlayerSlot {
                 return {
                     port: this.port,
                     character: this.characterKey,
+                    team: gameMode === 'team' ? this.team : -1,
                     deviceConfig: {
                         type: SMASH.CONTROLLER_TYPES.KEYBOARD,
                         layout: layout,
@@ -156,10 +165,11 @@ class PlayerSlot {
 // ══════════════════════════════════════════════════════════════════
 
 class CharacterSelectScene {
-    constructor(canvas, deviceMgr) {
+    constructor(canvas, deviceMgr, options) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.deviceMgr = deviceMgr || new SMASH.DeviceManager();
+        this._gameMode = (options && options.gameMode) || 'stock';
 
         // Player slots
         this.slots = [
@@ -198,6 +208,7 @@ class CharacterSelectScene {
         this._lastTime = 0;
         this._running = false;
         this._raf = null;
+        this._wasGameReady = false;
 
         // Callback when match starts
         this.onStartMatch = null;
@@ -292,8 +303,19 @@ class CharacterSelectScene {
         // Check if can start
         this._checkStartCondition();
 
+        // Trigger SFX on transition into game-ready state
+        this._updateGameReadySFXState();
+
         // Clear mouse click at end of frame
         this._mouseClicked = false;
+    }
+
+    _updateGameReadySFXState() {
+        const isReadyNow = this._hasEnoughReadyPlayers();
+        if (isReadyNow && !this._wasGameReady && SMASH.SFX) {
+            SMASH.SFX.playGameReady();
+        }
+        this._wasGameReady = isReadyNow;
     }
 
     _rebuildDeviceList() {
@@ -406,9 +428,13 @@ class CharacterSelectScene {
             slot._inputCooldown = cooldown;
         }
 
-        // Enter/Space: toggle ready
-        if (this._justPressed('Enter') || this._justPressed('Space')) {
-            slot.toggleReady();
+        // Space: toggle ready
+        if (this._justPressed('Space')) {
+            const lockedIn = slot.toggleReady();
+            if (lockedIn && SMASH.SFX) {
+                SMASH.SFX.playCharacterSelect(slot.characterKey);
+                SMASH.SFX.playSelectAny();
+            }
             slot._inputCooldown = cooldown;
         }
 
@@ -447,6 +473,18 @@ class CharacterSelectScene {
             slot._inputCooldown = cooldown;
         }
 
+        // T/G: cycle team (only in team mode)
+        if (this._gameMode === 'team') {
+            if (this._justPressed('KeyT')) {
+                slot.cycleTeam(1);
+                slot._inputCooldown = cooldown;
+            }
+            if (this._justPressed('KeyG')) {
+                slot.cycleTeam(-1);
+                slot._inputCooldown = cooldown;
+            }
+        }
+
         // Backspace: deactivate focused slot (except P1)
         if (this._justPressed('Backspace') && this.focusedSlot > 0) {
             this.slots[this.focusedSlot].deactivate();
@@ -466,21 +504,31 @@ class CharacterSelectScene {
     }
 
     _checkStartCondition() {
-        const active = this.slots.filter(s => s.active);
-        if (active.length < 2) {
+        if (!this._canStartMatch()) {
             this.startHovered = false;
             return;
         }
-        const allReady = active.every(s => s.ready);
-        if (allReady && this._justPressed('Enter')) {
+        if (this._justPressed('Enter')) {
             this._startMatch();
         }
+    }
+
+    _canStartMatch() {
+        const active = this.slots.filter(s => s.active);
+        const minPlayers = this._gameMode === 'wave' ? 1 : 2;
+        return active.length >= minPlayers && active.every(s => s.ready);
+    }
+
+    _hasEnoughReadyPlayers() {
+        const readyCount = this.slots.filter(s => s.active && s.ready).length;
+        const minReady = this._gameMode === 'wave' ? 1 : 2;
+        return readyCount >= minReady;
     }
 
     _startMatch() {
         const configs = this.slots
             .filter(s => s.active)
-            .map(s => s.getConfig(this._availableDevices));
+            .map(s => s.getConfig(this._availableDevices, this._gameMode));
 
         if (this.onStartMatch) {
             this.onStartMatch(configs);
@@ -519,6 +567,9 @@ class CharacterSelectScene {
 
         // Start button
         this._renderStartButton(ctx);
+
+        // Flashy confirmation overlay when lobby is fully ready
+        this._renderGameReadyOverlay(ctx);
     }
 
     _renderTitle(ctx) {
@@ -581,12 +632,12 @@ class CharacterSelectScene {
     }
 
     _renderCharacterPortraits(ctx) {
-        const w = 170;
-        const h = 150;
-        const gap = 18;
-        const charsPerRow = 4;
-        const rowGap = 15;
-        const startY = 110;
+        const w = 115;
+        const h = 108;
+        const gap = 10;
+        const charsPerRow = 8;
+        const rowGap = 10;
+        const startY = 95;
 
         for (let i = 0; i < this.characters.length; i++) {
             const ch = this.characters[i];
@@ -619,15 +670,15 @@ class CharacterSelectScene {
 
             // Character name
             ctx.fillStyle = ch.color || '#fff';
-            ctx.font = 'bold 18px Arial';
+            ctx.font = 'bold 14px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText(ch.name.toUpperCase(), x + w / 2, y + h - 10);
+            ctx.fillText(ch.name.toUpperCase(), x + w / 2, y + h - 8);
 
             // Character sprite/portrait
-            const portraitX = x + 10;
-            const portraitY = y + 15;
-            const portraitW = w - 20;
-            const portraitH = h - 50;
+            const portraitX = x + 6;
+            const portraitY = y + 10;
+            const portraitW = w - 12;
+            const portraitH = h - 38;
             
             if (ch.data && ch.data.spriteLoaded && ch.data.spriteImage) {
                 // Draw actual character sprite
@@ -656,10 +707,10 @@ class CharacterSelectScene {
     }
 
     _renderPlayerSlots(ctx) {
-        const y = 450;
-        const w = 280;
-        const h = 180;
-        const gap = 20;
+        const y = 360;
+        const w = 260;
+        const h = 170;
+        const gap = 16;
         const totalW = 4 * w + 3 * gap;
         const startX = (S.W - totalW) / 2;
 
@@ -711,6 +762,19 @@ class CharacterSelectScene {
                 : 'HUMAN';
             ctx.fillText(ctrlText, x + w / 2, y + 90);
 
+            // Team badge (team mode only)
+            if (this._gameMode === 'team') {
+                const teamLetters = ['A', 'B', 'C', 'D'];
+                const teamColors  = ['#ff4444', '#4488ff', '#44dd44', '#ddaa22'];
+                const tl = teamLetters[slot.team] || 'A';
+                const tc = teamColors[slot.team] || '#fff';
+                ctx.fillStyle = tc;
+                ctx.font = 'bold 18px Arial';
+                ctx.textAlign = 'right';
+                ctx.fillText(`TEAM ${tl}`, x + w - 8, y + 30);
+                ctx.textAlign = 'center';
+            }
+
             // Device assignment (for human players)
             if (slot.controllerType === 'human') {
                 const devName = slot.getSelectedDeviceName(this._availableDevices);
@@ -740,15 +804,20 @@ class CharacterSelectScene {
             } else {
                 ctx.fillStyle = '#fa4';
                 ctx.font = '16px Arial';
-                ctx.fillText('Press ENTER', x + w / 2, y + 130);
+                ctx.fillText('Press SPACE', x + w / 2, y + 130);
             }
 
             // Controls hint
             ctx.fillStyle = '#888';
             ctx.font = '11px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('←→: Char  ↑↓: Type  R/F: Device', x + w / 2, y + h - 30);
-            ctx.fillText('Q/E: AI  ESC: Cancel', x + w / 2, y + h - 15);
+            if (this._gameMode === 'team') {
+                ctx.fillText('←→: Char  ↑↓: Type  T/G: Team', x + w / 2, y + h - 30);
+                ctx.fillText('R/F: Device  Q/E: AI  ESC: Cancel', x + w / 2, y + h - 15);
+            } else {
+                ctx.fillText('←→: Char  ↑↓: Type  R/F: Device', x + w / 2, y + h - 30);
+                ctx.fillText('Q/E: AI  ESC: Cancel', x + w / 2, y + h - 15);
+            }
         }
     }
 
@@ -760,16 +829,19 @@ class CharacterSelectScene {
         ctx.fillText('TAB: Switch Focus  •  1-4: Join Slot  •  BACKSPACE: Leave Slot', S.W / 2, 625);
         ctx.fillStyle = '#8ab';
         ctx.font = '13px Arial';
-        ctx.fillText('R/F: Cycle Input Device  •  Q/E: AI Level  •  Click 🎮 to assign device', S.W / 2, 642);
+        if (this._gameMode === 'team') {
+            ctx.fillText('R/F: Device  •  Q/E: AI  •  T/G: Cycle Team  •  Click 🎮 to assign device', S.W / 2, 642);
+        } else {
+            ctx.fillText('R/F: Cycle Input Device  •  Q/E: AI Level  •  Click 🎮 to assign device', S.W / 2, 642);
+        }
         ctx.restore();
     }
 
     _renderStartButton(ctx) {
-        const active = this.slots.filter(s => s.active);
-        const canStart = active.length >= 2 && active.every(s => s.ready);
+        const canStart = this._canStartMatch();
 
         const x = S.W / 2 - 100;
-        const y = 660;
+        const y = 560;
         const w = 200;
         const h = 50;
 
@@ -791,6 +863,52 @@ class CharacterSelectScene {
             ctx.font = '12px Arial';
             ctx.fillText('Press ENTER', x + w / 2, y + h + 18);
         }
+    }
+
+    _renderGameReadyOverlay(ctx) {
+        if (!this._hasEnoughReadyPlayers()) return;
+
+        const t = performance.now() / 1000;
+        const pulse = 0.55 + 0.45 * Math.sin(t * 8.0);
+        const glowA = 0.18 + 0.16 * pulse;
+
+        ctx.save();
+
+        // Full-screen tint flash
+        ctx.fillStyle = `rgba(80, 255, 150, ${glowA.toFixed(3)})`;
+        ctx.fillRect(0, 0, S.W, S.H);
+
+        // Main banner
+        const bannerW = 760;
+        const bannerH = 120;
+        const bx = (S.W - bannerW) / 2;
+        const by = 220;
+
+        const grad = ctx.createLinearGradient(bx, by, bx + bannerW, by);
+        grad.addColorStop(0, `rgba(20, 80, 40, ${(0.75 + pulse * 0.2).toFixed(3)})`);
+        grad.addColorStop(0.5, `rgba(70, 220, 130, ${(0.8 + pulse * 0.2).toFixed(3)})`);
+        grad.addColorStop(1, `rgba(20, 80, 40, ${(0.75 + pulse * 0.2).toFixed(3)})`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(bx, by, bannerW, bannerH);
+
+        ctx.strokeStyle = '#d8ffe8';
+        ctx.lineWidth = 4 + pulse * 2;
+        ctx.strokeRect(bx, by, bannerW, bannerH);
+
+        // Text
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 72px Arial';
+        ctx.strokeStyle = 'rgba(0, 40, 15, 0.95)';
+        ctx.lineWidth = 7;
+        ctx.strokeText('GAME READY', S.W / 2, by + 82);
+        ctx.fillStyle = '#f4fff8';
+        ctx.fillText('GAME READY', S.W / 2, by + 82);
+
+        ctx.font = 'bold 20px Arial';
+        ctx.fillStyle = '#eafff0';
+        ctx.fillText('Press ENTER to start', S.W / 2, by + bannerH + 34);
+
+        ctx.restore();
     }
 }
 

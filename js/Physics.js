@@ -27,7 +27,9 @@ class Physics {
 
         // ── Friction ─────────────────────────────────────────────
         if (f.grounded) {
-            f.vx *= Math.max(0, 1 - this.groundFriction * dt);
+            let fric = this.groundFriction;
+            if (f.slipperyTimer > 0) fric *= S.SLIPPERY_FRICTION_MULT;
+            f.vx *= Math.max(0, 1 - fric * dt);
         } else {
             f.vx *= Math.max(0, 1 - this.airFriction * dt);
         }

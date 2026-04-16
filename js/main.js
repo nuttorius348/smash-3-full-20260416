@@ -26,10 +26,12 @@
  */
 (function () {
 
-const canvas     = document.getElementById('gameCanvas');
-const menuDiv    = document.getElementById('menu');
-const startBtn   = document.getElementById('startBtn');
-const galleryBtn = document.getElementById('galleryBtn');
+const canvas        = document.getElementById('gameCanvas');
+const menuDiv       = document.getElementById('menu');
+const startBtn      = document.getElementById('startBtn');
+const galleryBtn    = document.getElementById('galleryBtn');
+const tierListBtn   = document.getElementById('tierListBtn');
+const multiplayerBtn = document.getElementById('multiplayerBtn');
 
 // ── Device manager for controller auto-detection ────────────────
 const deviceMgr = new SMASH.DeviceManager();
@@ -68,6 +70,7 @@ function showMenu() {
     canvas.style.display  = 'none';
     menuDiv.style.display = 'flex';
     startScan();
+    SMASH.Music.play('main');
 }
 
 /**
@@ -81,8 +84,11 @@ function showCharSelect(settings) {
     lastMenuSettings = settings || lastMenuSettings;
     menuDiv.style.display = 'none';
     canvas.style.display  = 'block';
+    if (document.activeElement) document.activeElement.blur();
 
-    const scene = new SMASH.CharacterSelectScene(canvas, deviceMgr);
+    const scene = new SMASH.CharacterSelectScene(canvas, deviceMgr, {
+        gameMode: lastMenuSettings.gameMode || 'stock',
+    });
 
     scene.onStartMatch = (configs) => {
         activeScene = null;
@@ -104,12 +110,18 @@ function startGame(configs, settings) {
     stopActiveScene();
     canvas.style.display  = 'block';
     menuDiv.style.display = 'none';
+    if (document.activeElement) document.activeElement.blur();
+
+    SMASH.Music.play('battle');
 
     const game = new SMASH.Game(canvas, configs, {
-        stageKey: settings.stageKey || 'battlefield',
-        stocks:   settings.stocks   || 3,
-        debug:    settings.debug    || false,
-        onExit:   handleGameExit,
+        stageKey:   settings.stageKey   || 'battlefield',
+        stocks:     settings.stocks     || 3,
+        debug:      settings.debug      || false,
+        gameMode:   settings.gameMode   || 'stock',
+        staminaHP:  settings.staminaHP  || 150,
+        ultimateVideos: settings.ultimateVideos !== false,
+        onExit:     handleGameExit,
     });
 
     game.start();
@@ -128,6 +140,7 @@ function showUltimateGallery() {
     stopScan();
     menuDiv.style.display = 'none';
     canvas.style.display  = 'block';
+    if (document.activeElement) document.activeElement.blur();
 
     const scene = new SMASH.UltimateGalleryScene(canvas, () => {
         activeScene = null;
@@ -135,6 +148,170 @@ function showUltimateGallery() {
     });
     scene.start();
     activeScene = scene;
+}
+
+/**
+ * Show the in-game sprite tier list scene.
+ */
+function showTierList() {
+    stopActiveScene();
+    stopScan();
+    menuDiv.style.display = 'none';
+    canvas.style.display  = 'block';
+    if (document.activeElement) document.activeElement.blur();
+
+    const scene = new SMASH.TierListScene(canvas, () => {
+        activeScene = null;
+        showMenu();
+    });
+    scene.start();
+    activeScene = scene;
+}
+
+/**
+ * Start the Draft mode flow.
+ * @param {object} settings
+ */
+function showDraft(settings) {
+    stopActiveScene();
+    stopScan();
+    lastMenuSettings = settings || lastMenuSettings;
+    menuDiv.style.display = 'none';
+    canvas.style.display  = 'block';
+    if (document.activeElement) document.activeElement.blur();
+
+    const scene = new SMASH.DraftScene(canvas, deviceMgr, {
+        p1Config: { type: 'human' },
+        p2Config: { type: 'ai', level: 5 },
+        stageKey: lastMenuSettings.stageKey || 'battlefield',
+        onDone: (p1Queue, p2Queue, p1Cfg, p2Cfg) => {
+            activeScene = null;
+            startDraftGame(p1Queue, p2Queue, p1Cfg, p2Cfg, lastMenuSettings);
+        },
+        onBack: () => {
+            activeScene = null;
+            showMenu();
+        },
+    });
+
+    scene.start();
+    activeScene = scene;
+}
+
+/**
+ * Launch a draft-mode Game with the drafted character queues.
+ */
+function startDraftGame(p1Queue, p2Queue, p1Cfg, p2Cfg, settings) {
+    stopActiveScene();
+    canvas.style.display  = 'block';
+    menuDiv.style.display = 'none';
+    if (document.activeElement) document.activeElement.blur();
+
+    // Build player configs — each player starts with their first drafted char
+    const configs = [
+        {
+            port: 0,
+            character: p1Queue[0],
+            type: p1Cfg.type === 'ai' ? 'ai' : undefined,
+            level: p1Cfg.level || 5,
+            team: -1,
+            ...(p1Cfg.type !== 'ai' ? { deviceConfig: { type: SMASH.CONTROLLER_TYPES.KEYBOARD, layout: 'wasd' } } : {}),
+        },
+        {
+            port: 1,
+            character: p2Queue[0],
+            type: p2Cfg.type === 'ai' ? 'ai' : undefined,
+            level: p2Cfg.level || 5,
+            team: -1,
+            ...(p2Cfg.type !== 'ai' ? { deviceConfig: { type: SMASH.CONTROLLER_TYPES.KEYBOARD, layout: 'arrows' } } : {}),
+        },
+    ];
+
+    SMASH.Music.play('battle');
+
+    const game = new SMASH.Game(canvas, configs, {
+        stageKey:   settings.stageKey || 'battlefield',
+        stocks:     1,     // each character = 1 stock
+        debug:      settings.debug || false,
+        gameMode:   'draft',
+        ultimateVideos: settings.ultimateVideos !== false,
+        onExit:     handleGameExit,
+    });
+
+    // Set draft queues (skip first character since it's already loaded)
+    game.setDraftQueues(p1Queue.slice(1), p2Queue.slice(1));
+    game.start();
+    activeScene = game;
+}
+
+/**
+ * Start the Tournament mode flow.
+ * @param {object} settings
+ */
+function showTournament(settings) {
+    stopActiveScene();
+    stopScan();
+    lastMenuSettings = settings || lastMenuSettings;
+    menuDiv.style.display = 'none';
+    canvas.style.display  = 'block';
+    if (document.activeElement) document.activeElement.blur();
+
+    const scene = new SMASH.TournamentScene(canvas, {
+        stageKey: lastMenuSettings.stageKey || 'battlefield',
+        ultimateVideos: lastMenuSettings.ultimateVideos !== false,
+        deviceMgr: deviceMgr,
+        onDone: () => {
+            activeScene = null;
+            showMenu();
+        },
+        onBack: () => {
+            activeScene = null;
+            showMenu();
+        },
+    });
+
+    scene.start();
+    activeScene = scene;
+}
+
+/**
+ * Start the Multiplayer flow.
+ */
+function showMultiplayer() {
+    stopActiveScene();
+    stopScan();
+    menuDiv.style.display = 'none';
+    canvas.style.display  = 'block';
+    if (document.activeElement) document.activeElement.blur();
+    SMASH.Music.play('multiplayer');
+
+    const scene = new SMASH.MultiplayerScene(canvas, {
+        deviceMgr: deviceMgr,
+        onBack: () => {
+            activeScene = null;
+            showMenu();
+        },
+    });
+
+    scene.start();
+    activeScene = scene;
+}
+
+/**
+ * Route to the correct scene based on game mode.
+ */
+function launchGameMode(settings) {
+    switch (settings.gameMode) {
+        case 'draft':
+            showDraft(settings);
+            break;
+        case 'tournament':
+            showTournament(settings);
+            break;
+        default:
+            showCharSelect(settings);
+            break;
+    }
 }
 
 function handleGameExit(reason) {
@@ -157,9 +334,12 @@ function handleGameExit(reason) {
 
 function readMenuSettings() {
     return {
-        stageKey: document.getElementById('stageSelect').value,
-        stocks:   parseInt(document.getElementById('stockCount').value, 10) || 3,
-        debug:    document.getElementById('debugToggle').checked,
+        gameMode:  document.getElementById('gameModeSelect').value,
+        stageKey:  document.getElementById('stageSelect').value,
+        stocks:    parseInt(document.getElementById('stockCount').value, 10) || 3,
+        staminaHP: parseInt(document.getElementById('staminaHP').value, 10) || 150,
+        debug:     document.getElementById('debugToggle').checked,
+        ultimateVideos: document.getElementById('ultimateVideosToggle').checked,
     };
 }
 
@@ -167,9 +347,9 @@ function readMenuSettings() {
 //  EVENT BINDINGS
 // ═════════════════════════════════════════════════════════════════
 
-// FIGHT button → character select
+// FIGHT button → mode-dependent scene
 startBtn.addEventListener('click', () => {
-    showCharSelect(readMenuSettings());
+    launchGameMode(readMenuSettings());
 });
 
 // GALLERY button → ultimate gallery
@@ -177,11 +357,21 @@ galleryBtn.addEventListener('click', () => {
     showUltimateGallery();
 });
 
+// TIER LIST button → in-game tier list scene
+tierListBtn.addEventListener('click', () => {
+    showTierList();
+});
+
+// MULTIPLAYER button
+multiplayerBtn.addEventListener('click', () => {
+    showMultiplayer();
+});
+
 // Enter from menu
 window.addEventListener('keydown', e => {
     if (menuDiv.style.display !== 'none' &&
         (e.code === 'Enter' || e.code === 'NumpadEnter')) {
-        showCharSelect(readMenuSettings());
+        launchGameMode(readMenuSettings());
     }
 });
 
@@ -190,6 +380,13 @@ window.addEventListener('gamepadconnected',    () => deviceMgr.scan());
 window.addEventListener('gamepaddisconnected', () => deviceMgr.scan());
 
 // ── Boot ─────────────────────────────────────────────────────────
+SMASH.Music.play('main');
 startScan();
+
+// Browsers block autoplay until first user gesture — retry main theme
+document.addEventListener('click', function _firstGesture() {
+    SMASH.Music.play('main');
+    document.removeEventListener('click', _firstGesture);
+}, { once: true });
 
 })();
