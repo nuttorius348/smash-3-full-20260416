@@ -27,6 +27,7 @@ class MusicManager {
         this._audios  = {};   // key → Audio element
         this._current = null; // currently playing track key
         this._vol     = VOLUME;
+        this._enabled = true;
 
         // Pre-create Audio elements so they're ready instantly
         for (const [key, src] of Object.entries(TRACKS)) {
@@ -40,6 +41,7 @@ class MusicManager {
 
     /** Play a track by key. No-op if already playing that track. */
     play(key) {
+        if (!this._enabled) return;
         if (!this._audios[key]) return;
         // If we think this track is current but it's actually paused
         // (e.g. browser blocked autoplay), allow a retry
@@ -69,6 +71,17 @@ class MusicManager {
             this._fadeOut(this._audios[this._current]);
         }
         this._current = null;
+    }
+
+    setEnabled(enabled) {
+        this._enabled = enabled !== false;
+        if (!this._enabled) {
+            this.stop();
+        }
+    }
+
+    isEnabled() {
+        return this._enabled;
     }
 
     /** Set master volume (0–1). */

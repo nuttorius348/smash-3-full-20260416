@@ -123,6 +123,23 @@ class Fighter {
         this._vaughanVonForm = false;
         this._pendingVaughanTransformCutscene = false;
 
+        // Sahur side-special charge state
+        this._sahurChargeFrames = 0;
+        this._sahurChargeRatio = 0;
+        this._sahurFullChargeFlash = 0;
+        this._sahurFullChargeTriggered = false;
+        this._sahurChargeLoopAudio = null;
+        this._sahurSideReleaseAudio = null;
+        if (this.data.key === 'sahur') {
+            this._sahurChargeLoopAudio = new Audio('assets/Sahur_soundeffect.mp3');
+            this._sahurChargeLoopAudio.loop = true;
+            this._sahurChargeLoopAudio.preload = 'auto';
+            this._sahurChargeLoopAudio.volume = 0.7;
+            this._sahurSideReleaseAudio = new Audio('assets/Sahur_soundeffect2.mp3');
+            this._sahurSideReleaseAudio.preload = 'auto';
+            this._sahurSideReleaseAudio.volume = 0.92;
+        }
+
         // Stamina mode
         this.staminaHP    = 0;   // 0 = not stamina mode
         this.maxStaminaHP = 0;
@@ -132,6 +149,10 @@ class Fighter {
 
         // Last-hit metadata for KO SFX routing
         this._lastHitWasSpecial = false;
+    }
+
+    _canPlaySfx() {
+        return !SMASH.SFX || !SMASH.SFX.isEnabled || SMASH.SFX.isEnabled();
     }
 
     // ── Properties ───────────────────────────────────────────────
@@ -155,6 +176,10 @@ class Fighter {
         // Slippery countdown
         if (this.slipperyTimer > 0) this.slipperyTimer--;
 
+        if (this._sahurFullChargeFlash > 0) {
+            this._sahurFullChargeFlash = Math.max(0, this._sahurFullChargeFlash - 1);
+        }
+
         // Shield regen when not shielding
         if (this.state !== ST.SHIELD && this.state !== ST.SHIELD_STUN) {
             this.shieldHP = Math.min(S.SHIELD_MAX_HP, this.shieldHP + S.SHIELD_REGEN);
@@ -169,7 +194,7 @@ class Fighter {
             case ST.HITSTUN:     this._tickHistun(); break;
             case ST.ATTACK:
             case ST.SPECIAL:
-            case ST.ULTIMATE:    this._tickAttack(); break;
+            case ST.ULTIMATE:    this._tickAttack(inp); break;
             case ST.JUMPSQUAT:   this._tickJumpsquat(); break;
             case ST.HELPLESS:    this._tickHelpless(inp); break;
             case ST.SHIELD_STUN: this._tickShieldStun(); break;
@@ -330,6 +355,12 @@ class Fighter {
         const atk = this.data.attacks[key];
         if (!atk) return null;
 
+        this._stopSahurChargeLoopAudio();
+        this._sahurChargeFrames = 0;
+        this._sahurChargeRatio = 0;
+        this._sahurFullChargeFlash = 0;
+        this._sahurFullChargeTriggered = false;
+
         this.currentAttack = atk;
         this._atkPhase = 'startup';
         this._atkTimer = atk.startupFrames;
@@ -345,15 +376,21 @@ class Fighter {
             this.state = isSpecial ? ST.SPECIAL : ST.ATTACK;
         }
 
-        // Up-B velocity boost
-        if (atk.boostVY !== undefined) {
+        // Up-B velocity boost (skip Sahur chargeable side-special lunge until release)
+        const isSahurChargeSideSpecial =
+            this.data.key === 'sahur' &&
+            key === 'side_special' &&
+            !!atk.chargeable;
+        if (!isSahurChargeSideSpecial && atk.boostVY !== undefined) {
             this.vy = atk.boostVY;
             if (atk.boostVX) this.vx += atk.boostVX * this.facing;
         }
 
         // Sound effect (e.g. Netanyahu side-special)
         if (atk.soundEffect) {
-            try { new Audio(atk.soundEffect).play(); } catch(_) {}
+            if (this._canPlaySfx()) {
+                try { new Audio(atk.soundEffect).play(); } catch(_) {}
+            }
         }
 
         if (isSpecial && SMASH.SFX) {
@@ -379,8 +416,97 @@ class Fighter {
         return { type: 'ultimate', port: this.port };
     }
 
-    _tickAttack() {
-        this._atkTimer--;
+    _setAudioPitch(audio, rate) {
+        if (!audio) return;
+        const r = Math.max(0.5, Math.min(3.0, rate));
+        audio.playbackRate = r;
+        try { audio.preservesPitch = false; } catch(_) {}
+        try { audio.mozPreservesPitch = false; } catch(_) {}
+        try { audio.webkitPreservesPitch = false; } catch(_) {}
+    }
+
+    _startSahurChargeLoopAudio() {
+        const a = this._sahurChargeLoopAudio;
+        if (!a) return;
+        if (!this._canPlaySfx()) {
+            this._stopSahurChargeLoopAudio();
+            return;
+        }
+        this._setAudioPitch(a, 1.0 + this._sahurChargeRatio * 1.25);
+        if (a.paused) {
+            const p = a.play();
+            if (p && p.catch) p.catch(() => {});
+        }
+    }
+
+    _updateSahurChargeLoopAudio() {
+        const a = this._sahurChargeLoopAudio;
+        if (!a) return;
+        this._setAudioPitch(a, 1.0 + this._sahurChargeRatio * 1.25);
+    }
+
+    _stopSahurChargeLoopAudio() {
+        const a = this._sahurChargeLoopAudio;
+        if (!a) return;
+        a.pause();
+        a.currentTime = 0;
+        this._setAudioPitch(a, 1.0);
+    }
+
+    _playSahurSideReleaseAudio() {
+        const a = this._sahurSideReleaseAudio;
+        if (!a) return;
+        if (!this._canPlaySfx()) return;
+        a.currentTime = 0;
+        const p = a.play();
+        if (p && p.catch) p.catch(() => {});
+    }
+
+    _tickAttack(inp) {
+        const isSahurSideCharge =
+            this.data.key === 'sahur' &&
+            this.state === ST.SPECIAL &&
+            this.currentAttack &&
+            this.currentAttack === this.data.attacks['side_special'] &&
+            this._atkPhase === 'startup' &&
+            !!this.currentAttack.chargeable;
+
+        if (isSahurSideCharge) {
+            const maxFrames = Math.max(1, this.currentAttack.maxChargeFrames || 120);
+            this._sahurChargeFrames = Math.min(maxFrames, this._sahurChargeFrames + 1);
+            this._sahurChargeRatio = this._sahurChargeFrames / maxFrames;
+
+            // Allow movement while charging before release.
+            const mx = inp ? (inp.moveX || 0) : 0;
+            if (Math.abs(mx) > 0.1) {
+                this.facing = mx > 0 ? 1 : -1;
+                const moveSpd = this.grounded ? this.data.walkSpeed * 0.85 : this.data.airSpeed * 0.75;
+                this.vx = mx * moveSpd;
+            } else {
+                this.vx *= this.grounded ? 0.65 : 0.9;
+                if (Math.abs(this.vx) < 4) this.vx = 0;
+            }
+
+            if (this._sahurChargeFrames >= maxFrames && !this._sahurFullChargeTriggered) {
+                this._sahurFullChargeTriggered = true;
+                this._sahurFullChargeFlash = 14;
+            }
+
+            const holdingSpecial = !!(inp && (inp.specialHeld || inp.special));
+            if (holdingSpecial) {
+                this._startSahurChargeLoopAudio();
+                this._updateSahurChargeLoopAudio();
+            }
+            const shouldRelease = !holdingSpecial || this._sahurChargeFrames >= maxFrames;
+            if (shouldRelease) {
+                this._atkTimer = 0;
+                this._stopSahurChargeLoopAudio();
+                this._playSahurSideReleaseAudio();
+            }
+        } else {
+            this._stopSahurChargeLoopAudio();
+            this._atkTimer--;
+        }
 
         if (this._atkPhase === 'startup') {
             if (this._atkTimer <= 0) {
@@ -392,6 +518,17 @@ class Fighter {
                 if (this.activeHitbox && this.damageMultiplier !== 1.0) {
                     this.activeHitbox.damage *= this.damageMultiplier;
                     this.activeHitbox.baseKB *= this.damageMultiplier;
+                }
+
+                // Sahur's charged bat swing scales with hold duration.
+                if (this.activeHitbox && this.data.key === 'sahur' &&
+                    this.currentAttack === this.data.attacks['side_special']) {
+                    const charge = this._sahurChargeRatio || 0;
+                    const fullChargeDamage = 175;
+                    const baseDamage = this.currentAttack.damage || this.activeHitbox.damage;
+                    this.activeHitbox.damage = baseDamage + (fullChargeDamage - baseDamage) * charge;
+                    this.activeHitbox.baseKB *= (1 + charge * 2.2);
+                    this.activeHitbox.kbScaling *= (1 + charge * 0.55);
                 }
 
                 // Vaughan's Von form boosts only normal + special attacks.
@@ -411,6 +548,9 @@ class Fighter {
                 if (this.currentAttack.chargesUlt) {
                     this.ultimateMeter = Math.min(S.ULT_MAX,
                         this.ultimateMeter + this.currentAttack.chargesUlt);
+                    if (SMASH.SFX && SMASH.SFX.playCharge) {
+                        SMASH.SFX.playCharge(this.data.key);
+                    }
                 }
 
                 // Transition focus → attack state for active phase
@@ -449,6 +589,11 @@ class Fighter {
 
         this.currentAttack = null;
         this.activeHitbox  = null;
+        this._stopSahurChargeLoopAudio();
+        this._sahurChargeFrames = 0;
+        this._sahurChargeRatio = 0;
+        this._sahurFullChargeFlash = 0;
+        this._sahurFullChargeTriggered = false;
 
         if (this.state === ST.ULTIMATE) {
             this.state = this.grounded ? ST.IDLE : ST.AIRBORNE;
@@ -733,6 +878,8 @@ class Fighter {
     // Hit reception
     // ──────────────────────────────────────────────────────────────
     takeHit(hitbox, attackerFacing, isSpecialHit, isUltimateHit) {
+        this._stopSahurChargeLoopAudio();
+
         // Play hit + character-specific hurt SFX
         if (SMASH.SFX) SMASH.SFX.playHit(this.data.key);
 
@@ -905,6 +1052,7 @@ class Fighter {
         if (this.grabTarget) {
             this._releaseGrab();
         }
+        this._stopSahurChargeLoopAudio();
         this.stocks--;
         if (this.stocks <= 0) { this.state = ST.DEAD; return; }
         this._respawn();
@@ -937,6 +1085,11 @@ class Fighter {
         this.grabHitsDealt = 0;
         this.grabTimer = 0;
         this._lastHitWasSpecial = false;
+        this._stopSahurChargeLoopAudio();
+        this._sahurChargeFrames = 0;
+        this._sahurChargeRatio = 0;
+        this._sahurFullChargeFlash = 0;
+        this._sahurFullChargeTriggered = false;
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -988,6 +1141,25 @@ class Fighter {
             ctx.beginPath();
             ctx.arc(eyeX + this.facing * 1.5 * cam.zoom, eyeY, 2.5 * cam.zoom, 0, Math.PI * 2);
             ctx.fill();
+        }
+
+        // Sahur charge aura: gets redder as side-special charge increases.
+        if (this.data.key === 'sahur' && this.state === ST.SPECIAL &&
+            this.currentAttack && this.currentAttack === this.data.attacks['side_special'] &&
+            this._atkPhase === 'startup' && this._sahurChargeRatio > 0) {
+            const alpha = 0.12 + this._sahurChargeRatio * 0.55;
+            ctx.fillStyle = `rgba(255,40,40,${alpha.toFixed(3)})`;
+            ctx.fillRect(sx, sy, sw, sh);
+        }
+
+        // Max-charge cue: a quick bright pulse when Sahur reaches full charge.
+        if (this.data.key === 'sahur' && this._sahurFullChargeFlash > 0) {
+            const p = this._sahurFullChargeFlash / 14;
+            ctx.fillStyle = `rgba(255,255,255,${(0.16 * p).toFixed(3)})`;
+            ctx.fillRect(sx, sy, sw, sh);
+            ctx.strokeStyle = `rgba(255,70,70,${(0.95 * p).toFixed(3)})`;
+            ctx.lineWidth = Math.max(2, 4 * cam.zoom * p);
+            ctx.strokeRect(sx - 2, sy - 2, sw + 4, sh + 4);
         }
 
         // Label

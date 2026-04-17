@@ -25,6 +25,7 @@ class NetworkController {
         s.jump    = !!raw.jump;
         s.attack  = !!raw.attack;
         s.special = !!raw.special;
+        s.specialHeld = !!raw.specialHeld;
         s.shield  = !!raw.shield;
         s.grab    = !!raw.grab;
     }
@@ -37,6 +38,7 @@ class NetworkController {
         out.jump    = this._current.jump;
         out.attack  = this._current.attack;
         out.special = this._current.special;
+        out.specialHeld = this._current.specialHeld;
         out.shield  = this._current.shield;
         out.grab    = this._current.grab;
 

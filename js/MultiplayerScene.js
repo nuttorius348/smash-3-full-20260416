@@ -47,6 +47,10 @@ class MultiplayerScene {
 
         this._onBack    = (options && options.onBack) || null;
         this._deviceMgr = (options && options.deviceMgr) || null;
+        this._mediaOpts = {
+            soundsEnabled: !(options && options.soundsEnabled === false),
+            ultimateVideos: !(options && options.ultimateVideos === false),
+        };
 
         this._phase     = PHASE.CONNECT;
         this._ws        = null;
@@ -55,12 +59,13 @@ class MultiplayerScene {
         this._connected = false;
 
         // ── Connection form ────────────────────────────────────────
-        this._connectMode   = 'menu';     // 'menu' | 'joining'
+        this._connectMode   = 'menu';     // 'menu' | 'hosting' | 'joining'
         this._connectCursor = 0;
         const loc = window.location;
         const served = loc.protocol.startsWith('http');
         this._ipInput       = served ? loc.hostname : 'localhost';
         this._portInput     = served ? (loc.port || '80') : '7777';
+        this._nameInput     = 'Player';
         this._editingField  = -1;
         this._connectError  = '';
         this._connectStatus = '';
@@ -83,9 +88,10 @@ class MultiplayerScene {
         this._modeOpts  = {};
         this._stageKey  = 'battlefield';
         this._lobbySection = 'char';  // 'char' | 'team'
-        this._setupSection = 'mode';  // 'mode' | 'stage' (setup phase)
+        this._setupSection = 'mode';  // 'mode' | 'stage' | 'media' (setup phase)
         this._modeCursor   = 0;
         this._stageCursor  = 0;
+        this._mediaCursor  = 0;
         this._teamCursor   = 0;
 
         // ── Match state ────────────────────────────────────────────
@@ -101,6 +107,14 @@ class MultiplayerScene {
         this._resultChars  = [];
         this._rematchRequested = new Array(MAX_PLAYERS).fill(false);
         this._readySlots = [];
+        this._lobbyNotice = '';
+
+        // Tournament status (server-driven)
+        this._tournamentActive = false;
+        this._tournamentRound = 0;
+        this._tournamentMatch = 0;
+        this._tournamentTotalMatches = 0;
+        this._tournamentPair = [];
 
         // ── Input ──────────────────────────────────────────────────
         this._mk  = {};
@@ -129,20 +143,39 @@ class MultiplayerScene {
     _handleTextInput(e) {
         const field = this._editingField;
         if (e.code === 'Enter' || e.code === 'NumpadEnter') { this._editingField = -1; return; }
-        if (e.code === 'Tab') { this._editingField = field === 0 ? 1 : 0; return; }
+        if (e.code === 'Tab') {
+            this._editingField = field >= 2 ? 0 : field + 1;
+            return;
+        }
         if (e.code === 'Escape') { this._editingField = -1; return; }
 
         const isIP = field === 0;
-        let val = isIP ? this._ipInput : this._portInput;
+        const isPort = field === 1;
+        let val = isIP ? this._ipInput : (isPort ? this._portInput : this._nameInput);
 
         if (e.code === 'Backspace') {
             val = val.slice(0, -1);
         } else if (e.key && e.key.length === 1) {
-            if (isIP) { if (/[a-zA-Z0-9.:\-]/.test(e.key)) val += e.key; }
-            else      { if (/[0-9]/.test(e.key) && val.length < 5) val += e.key; }
+            if (isIP) {
+                if (/[a-zA-Z0-9.:\-]/.test(e.key)) val += e.key;
+            } else if (isPort) {
+                if (/[0-9]/.test(e.key) && val.length < 5) val += e.key;
+            } else if (/[-_ a-zA-Z0-9]/.test(e.key) && val.length < 16) {
+                val += e.key;
+            }
         }
 
-        if (isIP) this._ipInput = val; else this._portInput = val;
+        if (isIP) this._ipInput = val;
+        else if (isPort) this._portInput = val;
+        else this._nameInput = val;
+    }
+
+    _sanitizeName(raw, fallback) {
+        const clean = String(raw || '')
+            .replace(/[^-_ a-zA-Z0-9]/g, '')
+            .trim()
+            .slice(0, 16);
+        return clean || fallback;
     }
 
     // ═════════════════════════════════════════════════════════════
@@ -262,6 +295,13 @@ class MultiplayerScene {
                     this._stageKey = msg.room.stage || 'battlefield';
                     this._modeCursor = GAME_MODES.indexOf(this._gameMode);
                     this._stageCursor = STAGES.indexOf(this._stageKey);
+                    if (msg.room.mediaOpts) this._mediaOpts = Object.assign({}, this._mediaOpts, msg.room.mediaOpts);
+                }
+                this._applyMediaOpts(this._mediaOpts);
+
+                // Host is authoritative for multiplayer media settings.
+                if (this._mySlot === 0) {
+                    this._send({ type: 'mediaSelect', mediaOpts: this._mediaOpts });
                 }
                 this._phase = (msg.room && msg.room.phase === 'lobby') ? PHASE.LOBBY : PHASE.SETUP;
                 SMASH.Music.play('multiplayer');
@@ -307,8 +347,15 @@ class MultiplayerScene {
                 this._stageCursor = STAGES.indexOf(this._stageKey);
                 break;
 
+            case 'mediaUpdate':
+                this._mediaOpts = Object.assign({}, this._mediaOpts, msg.mediaOpts || {});
+                this._applyMediaOpts(this._mediaOpts);
+                break;
+
             case 'setupDone':
                 this._phase = PHASE.LOBBY;
+                this._tournamentActive = false;
+                this._lobbyNotice = '';
                 SMASH.Music.play('multiplayer');
                 for (let i = 0; i < MAX_PLAYERS; i++) {
                     this._slotChars[i] = null;
@@ -326,6 +373,22 @@ class MultiplayerScene {
 
             case 'matchStart':
                 this._startMatch(msg);
+                break;
+
+            case 'tournamentComplete':
+                this._tournamentActive = false;
+                this._resultWinner = msg.winner != null ? msg.winner : -1;
+                this._readySlots = [];
+                this._rematchRequested = new Array(MAX_PLAYERS).fill(false);
+                this._phase = PHASE.RESULT;
+                this._lobbyNotice = msg.msg || 'Tournament complete!';
+                SMASH.Music.play('multiplayer');
+                break;
+
+            case 'tournamentCancelled':
+                this._tournamentActive = false;
+                this._lobbyNotice = msg.msg || 'Tournament cancelled.';
+                this._phase = PHASE.LOBBY;
                 break;
 
             case 'remoteInput':
@@ -365,7 +428,9 @@ class MultiplayerScene {
             self._lastLocalInput = {
                 moveX: inp.moveX, moveY: inp.moveY,
                 jump: inp.jump, attack: inp.attack,
-                special: inp.special, shield: inp.shield, grab: inp.grab,
+                special: inp.special,
+                specialHeld: !!inp.specialHeld,
+                shield: inp.shield, grab: inp.grab,
             };
             return raw;
         };
@@ -384,9 +449,22 @@ class MultiplayerScene {
 
     _startMatch(msg) {
         this._phase = PHASE.PLAYING;
+        if (msg.mediaOpts) {
+            this._mediaOpts = Object.assign({}, this._mediaOpts, msg.mediaOpts);
+        }
+        this._applyMediaOpts(this._mediaOpts);
         SMASH.Music.play('battle');
         this._resultChars = msg.chars;
         this._readySlots = msg.readySlots || [];
+        this._lobbyNotice = '';
+
+        this._tournamentActive = !!(msg.tournament && msg.tournament.active);
+        this._tournamentRound = msg.tournament ? (msg.tournament.round || 0) : 0;
+        this._tournamentMatch = msg.tournament ? (msg.tournament.matchIndex || 0) : 0;
+        this._tournamentTotalMatches = msg.tournament ? (msg.tournament.totalMatches || 0) : 0;
+        this._tournamentPair = msg.tournament && Array.isArray(msg.tournament.pair)
+            ? msg.tournament.pair.slice(0, 2)
+            : [];
 
         const isHost = this._mySlot === 0;
         const readySlots = msg.readySlots || [];
@@ -425,7 +503,9 @@ class MultiplayerScene {
             stocks:    (mode === 'stamina' || mode === 'wave' || mode === 'draft') ? 1 : 3,
             staminaHP: (msg.modeOpts && msg.modeOpts.staminaHP) || 150,
             debug:     false,
-            gameMode:  mode === 'tournament' ? 'stock' : mode,
+            gameMode:  mode,
+            soundsEnabled: this._mediaOpts.soundsEnabled !== false,
+            ultimateVideos: this._mediaOpts.ultimateVideos !== false,
             guestMode: !isHost,
             onExit: function (reason) {
                 self._activeGame = null;
@@ -457,6 +537,17 @@ class MultiplayerScene {
                         if (f.isAlive && !game._waveEnemies.includes(f)) { winnerSlot = f.port; break; }
                     }
                 }
+
+                if (self._tournamentActive) {
+                    if (isHost) {
+                        self._send({ type: 'matchResult', winner: winnerSlot });
+                    }
+                    self._phase = PHASE.LOBBY;
+                    self._lobbyNotice = 'Tournament match finished. Waiting for next bracket match...';
+                    SMASH.Music.play('multiplayer');
+                    return;
+                }
+
                 self._resultWinner = winnerSlot;
                 self._rematchRequested = new Array(MAX_PLAYERS).fill(false);
                 self._phase = PHASE.RESULT;
@@ -541,19 +632,28 @@ class MultiplayerScene {
 
             if (this._jp('Enter') || this._jp('NumpadEnter') || this._jp('Space')) {
                 if (this._connectCursor === 0) {
-                    this._myName = 'Host';
-                    this._connect(this._ipInput, this._portInput || '7777');
+                    this._connectMode = 'hosting';
+                    this._editingField = 2;
                 } else {
                     this._connectMode = 'joining';
-                    this._myName = 'Guest';
                     this._editingField = 0;
                 }
             }
-        } else if (this._connectMode === 'joining') {
+        } else if (this._connectMode === 'joining' || this._connectMode === 'hosting') {
             if (this._jp('Backspace') && this._editingField < 0) {
                 this._connectMode = 'menu'; this._connectError = ''; return;
             }
-            if ((this._jp('Enter') || this._jp('NumpadEnter')) && this._editingField < 0) {
+
+            if (this._jp('Tab') && this._editingField < 0) {
+                this._editingField = 0;
+                return;
+            }
+
+            if ((this._jp('Enter') || this._jp('NumpadEnter') || this._jp('Space')) && this._editingField < 0) {
+                this._myName = this._sanitizeName(
+                    this._nameInput,
+                    this._connectMode === 'hosting' ? 'Host' : 'Guest'
+                );
                 this._connect(this._ipInput || 'localhost', this._portInput || '7777');
             }
         }
@@ -575,7 +675,9 @@ class MultiplayerScene {
         if (!isHost) return;
 
         if (this._jp('Tab')) {
-            this._setupSection = this._setupSection === 'mode' ? 'stage' : 'mode';
+            const sections = ['mode', 'stage', 'media'];
+            const idx = sections.indexOf(this._setupSection);
+            this._setupSection = sections[(idx + 1) % sections.length];
             return;
         }
 
@@ -591,7 +693,7 @@ class MultiplayerScene {
                 this._gameMode = GAME_MODES[this._modeCursor];
                 this._send({ type: 'modeSelect', mode: this._gameMode, modeOpts: this._modeOpts });
             }
-        } else {
+        } else if (this._setupSection === 'stage') {
             let changed = false;
             if (this._jp('ArrowUp') || this._jp('KeyW')) {
                 this._stageCursor = Math.max(0, this._stageCursor - 1); changed = true;
@@ -603,13 +705,34 @@ class MultiplayerScene {
                 this._stageKey = STAGES[this._stageCursor];
                 this._send({ type: 'stageSelect', stage: this._stageKey });
             }
+        } else {
+            if (this._jp('ArrowUp') || this._jp('KeyW')) {
+                this._mediaCursor = Math.max(0, this._mediaCursor - 1);
+            }
+            if (this._jp('ArrowDown') || this._jp('KeyS')) {
+                this._mediaCursor = Math.min(1, this._mediaCursor + 1);
+            }
+            if (this._jp('ArrowLeft') || this._jp('KeyA') || this._jp('ArrowRight') || this._jp('KeyD') || this._jp('Space')) {
+                this._toggleSetupMediaOption();
+            }
         }
 
         if (this._jp('Enter') || this._jp('NumpadEnter')) {
             this._send({ type: 'modeSelect', mode: this._gameMode, modeOpts: this._modeOpts });
             this._send({ type: 'stageSelect', stage: this._stageKey });
+            this._send({ type: 'mediaSelect', mediaOpts: this._mediaOpts });
             this._send({ type: 'setupDone' });
         }
+    }
+
+    _toggleSetupMediaOption() {
+        if (this._mediaCursor === 0) {
+            this._mediaOpts.soundsEnabled = !this._mediaOpts.soundsEnabled;
+        } else {
+            this._mediaOpts.ultimateVideos = !this._mediaOpts.ultimateVideos;
+        }
+        this._applyMediaOpts(this._mediaOpts);
+        this._send({ type: 'mediaSelect', mediaOpts: this._mediaOpts });
     }
 
     // ── Lobby ────────────────────────────────────────────────────
@@ -626,6 +749,10 @@ class MultiplayerScene {
 
         const isHost = this._mySlot === 0;
         const myReady = this._slotReady[this._mySlot];
+
+        if (this._tournamentActive) {
+            return;
+        }
 
         // Tab to switch sections: char / team
         if (this._jp('Tab') && !myReady) {
@@ -765,6 +892,24 @@ class MultiplayerScene {
         this._lobbySection = 'char';
     }
 
+    _applyMediaOpts(mediaOpts) {
+        const soundsEnabled = !(mediaOpts && mediaOpts.soundsEnabled === false);
+        const videosEnabled = !(mediaOpts && mediaOpts.ultimateVideos === false);
+
+        if (SMASH.SFX && SMASH.SFX.setEnabled) {
+            SMASH.SFX.setEnabled(soundsEnabled);
+        }
+        if (SMASH.Music && SMASH.Music.setEnabled) {
+            SMASH.Music.setEnabled(soundsEnabled);
+        }
+        if (this._activeGame && this._activeGame.ultMgr) {
+            this._activeGame._soundsEnabled = soundsEnabled;
+            this._activeGame._ultimateVideos = videosEnabled;
+            this._activeGame.ultMgr.setSoundEnabled(soundsEnabled);
+            this._activeGame.ultMgr.setVideoEnabled(videosEnabled);
+        }
+    }
+
     // ── Result ───────────────────────────────────────────────────
     _tickResult() {
         if (this._jp('Escape')) {
@@ -776,6 +921,12 @@ class MultiplayerScene {
         }
 
         if (this._jp('Enter') || this._jp('NumpadEnter') || this._jp('Space')) {
+            if (this._readySlots.length < 2) {
+                for (let i = 0; i < MAX_PLAYERS; i++) this._slotReady[i] = false;
+                this._phase = PHASE.LOBBY;
+                return;
+            }
+
             if (!this._rematchRequested[this._mySlot]) {
                 this._rematchRequested[this._mySlot] = true;
                 this._send({ type: 'rematch' });
@@ -819,6 +970,9 @@ class MultiplayerScene {
         ctx.font = '16px Arial';
         ctx.fillStyle = '#888';
         ctx.fillText('LAN Online - Up to 4 players', S.W / 2, 105);
+            ctx.font = '15px Arial';
+            ctx.fillStyle = '#aaa';
+            ctx.fillText('Name: ' + this._sanitizeName(this._nameInput, 'Player'), S.W / 2, 138);
 
         if (this._connectMode === 'menu') {
             const opts = ['HOST GAME', 'JOIN GAME'];
@@ -836,16 +990,19 @@ class MultiplayerScene {
             ctx.fillText('HOST: Run "node server/multiplayer-server.js" then click Host', S.W / 2, 400);
             ctx.fillText('JOIN: Enter the host\'s IP address and port', S.W / 2, 425);
             ctx.fillText('Up to 4 players on the same network', S.W / 2, 450);
-        } else if (this._connectMode === 'joining') {
+        } else if (this._connectMode === 'joining' || this._connectMode === 'hosting') {
+            const isHosting = this._connectMode === 'hosting';
             ctx.font = 'bold 28px Arial'; ctx.fillStyle = '#fff';
-            ctx.fillText('JOIN A GAME', S.W / 2, 180);
+            ctx.fillText(isHosting ? 'HOST A GAME' : 'JOIN A GAME', S.W / 2, 180);
 
             const ipSel  = this._editingField === 0;
             const portSel = this._editingField === 1;
+            const nameSel = this._editingField === 2;
 
             ctx.textAlign = 'right'; ctx.font = '20px Arial'; ctx.fillStyle = '#aaa';
             ctx.fillText('IP Address:', S.W / 2 - 10, 250);
             ctx.fillText('Port:', S.W / 2 - 10, 310);
+            ctx.fillText('Name:', S.W / 2 - 10, 370);
             ctx.textAlign = 'left';
 
             // IP box
@@ -862,18 +1019,25 @@ class MultiplayerScene {
             ctx.fillStyle = '#fff';
             ctx.fillText(this._portInput + (portSel ? '|' : ''), S.W / 2 + 18, 310);
 
+            // Name box
+            ctx.fillStyle = nameSel ? 'rgba(255,215,0,0.1)' : 'rgba(255,255,255,0.05)';
+            ctx.beginPath(); ctx.roundRect(S.W / 2 + 10, 350, 280, 36, 6); ctx.fill();
+            if (nameSel) { ctx.strokeStyle = '#ffd700'; ctx.lineWidth = 2; ctx.stroke(); }
+            ctx.fillStyle = '#fff';
+            ctx.fillText(this._nameInput + (nameSel ? '|' : ''), S.W / 2 + 18, 370);
+
             ctx.textAlign = 'center'; ctx.font = '14px Arial'; ctx.fillStyle = '#888';
             if (this._editingField < 0) {
-                ctx.fillText('Click a field to edit, or press Enter to connect', S.W / 2, 370);
-                ctx.fillText('Backspace: Go back', S.W / 2, 395);
+                ctx.fillText('Tab: Edit fields  |  Enter/Space: Connect', S.W / 2, 425);
+                ctx.fillText('Backspace: Go back', S.W / 2, 450);
                 // Connect button
                 ctx.fillStyle = 'rgba(0,200,100,0.2)';
-                ctx.beginPath(); ctx.roundRect(S.W / 2 - 80, 430, 160, 45, 8); ctx.fill();
+                ctx.beginPath(); ctx.roundRect(S.W / 2 - 80, 490, 160, 45, 8); ctx.fill();
                 ctx.strokeStyle = '#0c6'; ctx.lineWidth = 2; ctx.stroke();
                 ctx.font = 'bold 22px Arial'; ctx.fillStyle = '#0c6';
-                ctx.fillText('CONNECT', S.W / 2, 455);
+                ctx.fillText(isHosting ? 'HOST' : 'CONNECT', S.W / 2, 515);
             } else {
-                ctx.fillText('Type to edit | Tab: switch | Enter: confirm | Esc: cancel', S.W / 2, 370);
+                ctx.fillText('Type to edit | Tab: next field | Enter: done | Esc: cancel', S.W / 2, 425);
             }
         }
 
@@ -920,11 +1084,13 @@ class MultiplayerScene {
             ctx.fillText(conn ? (this._slotNames[i] || 'P' + (i + 1)) : '\u2014', px + 35, 131);
         }
 
-        // Two columns
-        const colW = 300;
-        const gap = 60;
-        const leftX = S.W / 2 - colW - gap / 2;
-        const rightX = S.W / 2 + gap / 2;
+        // Three columns
+        const colW = 250;
+        const gap = 25;
+        const totalW = colW * 3 + gap * 2;
+        const leftX = S.W / 2 - totalW / 2;
+        const midX = leftX + colW + gap;
+        const rightX = midX + colW + gap;
         const topY = 175;
 
         // ── MODE column ──
@@ -949,27 +1115,63 @@ class MultiplayerScene {
         // ── STAGE column ──
         const sSel = isHost && this._setupSection === 'stage';
         ctx.font = 'bold 20px Arial'; ctx.fillStyle = sSel ? '#ffd700' : '#aaa';
-        ctx.fillText('STAGE', rightX + colW / 2, topY);
-        if (sSel) { ctx.font = '11px Arial'; ctx.fillStyle = '#666'; ctx.fillText('\u25B2\u25BC to select', rightX + colW / 2, topY + 18); }
+        ctx.fillText('STAGE', midX + colW / 2, topY);
+        if (sSel) { ctx.font = '11px Arial'; ctx.fillStyle = '#666'; ctx.fillText('\u25B2\u25BC to select', midX + colW / 2, topY + 18); }
 
         for (let i = 0; i < STAGES.length; i++) {
             const y = topY + 42 + i * 52;
             const active = STAGES[i] === this._stageKey;
             const cursor = sSel && i === this._stageCursor;
             ctx.fillStyle = active ? 'rgba(0,200,100,0.12)' : (cursor ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.02)');
-            ctx.beginPath(); ctx.roundRect(rightX, y - 18, colW, 44, 6); ctx.fill();
+            ctx.beginPath(); ctx.roundRect(midX, y - 18, colW, 44, 6); ctx.fill();
             if (active) { ctx.strokeStyle = '#0c6'; ctx.lineWidth = 2; ctx.stroke(); }
             else if (cursor) { ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.stroke(); }
             ctx.font = active ? 'bold 18px Arial' : '17px Arial';
             ctx.fillStyle = active ? '#0c6' : (cursor ? '#ddd' : '#777');
-            ctx.fillText(STAGE_LABELS[STAGES[i]], rightX + colW / 2, y + 4);
+            ctx.fillText(STAGE_LABELS[STAGES[i]], midX + colW / 2, y + 4);
+        }
+
+        // ── MEDIA column ──
+        const mediaSel = isHost && this._setupSection === 'media';
+        ctx.font = 'bold 20px Arial';
+        ctx.fillStyle = mediaSel ? '#ffd700' : '#aaa';
+        ctx.fillText('MEDIA', rightX + colW / 2, topY);
+        if (mediaSel) {
+            ctx.font = '11px Arial';
+            ctx.fillStyle = '#666';
+            ctx.fillText('\u25B2\u25BC select  |  \u25C4\u25BA/Space toggle', rightX + colW / 2, topY + 18);
+        }
+
+        const mediaRows = [
+            { label: 'Sounds', enabled: this._mediaOpts.soundsEnabled !== false },
+            { label: 'Ultimate Videos', enabled: this._mediaOpts.ultimateVideos !== false },
+        ];
+        for (let i = 0; i < mediaRows.length; i++) {
+            const y = topY + 42 + i * 52;
+            const row = mediaRows[i];
+            const cursor = mediaSel && i === this._mediaCursor;
+            const active = !!row.enabled;
+
+            ctx.fillStyle = active ? 'rgba(0,200,100,0.12)' : 'rgba(220,60,60,0.12)';
+            if (cursor) ctx.fillStyle = active ? 'rgba(0,200,100,0.2)' : 'rgba(220,60,60,0.2)';
+            ctx.beginPath();
+            ctx.roundRect(rightX, y - 18, colW, 44, 6);
+            ctx.fill();
+
+            ctx.strokeStyle = active ? '#0c6' : '#f55';
+            ctx.lineWidth = cursor ? 2 : 1;
+            ctx.stroke();
+
+            ctx.font = 'bold 17px Arial';
+            ctx.fillStyle = active ? '#0c6' : '#f66';
+            ctx.fillText(row.label + ': ' + (active ? 'ON' : 'OFF'), rightX + colW / 2, y + 4);
         }
 
         // Footer
         ctx.font = '14px Arial'; ctx.textAlign = 'center';
         if (isHost) {
             ctx.fillStyle = '#0c6';
-            ctx.fillText('Tab: Switch column  |  \u25B2\u25BC Navigate  |  Enter: Continue to Character Select', S.W / 2, S.H - 40);
+            ctx.fillText('Tab: Switch column  |  \u25B2\u25BC Navigate  |  \u25C4\u25BA/Space: Toggle media  |  Enter: Continue', S.W / 2, S.H - 40);
         }
         ctx.fillStyle = '#555';
         ctx.fillText('Esc: Disconnect', S.W / 2, S.H - 18);
@@ -989,6 +1191,19 @@ class MultiplayerScene {
             ? 'HOST | Enter: Start when all ready'
             : 'GUEST | Waiting for host to start';
         ctx.fillText(roleText + '  |  Stage: ' + (STAGE_LABELS[this._stageKey] || this._stageKey), S.W / 2, 52);
+
+        if (this._tournamentActive) {
+            ctx.font = '12px Arial';
+            ctx.fillStyle = '#f7d36f';
+            const pairLabel = this._tournamentPair.length === 2
+                ? `${this._slotNames[this._tournamentPair[0]] || ('P' + (this._tournamentPair[0] + 1))} vs ${this._slotNames[this._tournamentPair[1]] || ('P' + (this._tournamentPair[1] + 1))}`
+                : 'Preparing next match';
+            ctx.fillText(
+                `Tournament Round ${this._tournamentRound} - Match ${this._tournamentMatch}/${Math.max(1, this._tournamentTotalMatches)}: ${pairLabel}`,
+                S.W / 2,
+                70
+            );
+        }
 
         // ── Player panels (top row) ──────────────────────────────
         const panelW = (S.W - 40) / MAX_PLAYERS - 10;
@@ -1021,6 +1236,9 @@ class MultiplayerScene {
             ctx.fillText('READY (' + readyCount + '/' + connCount + ') ' +
                 (this._mySlot === 0 ? '| Enter: START' : '| Waiting for host...') +
                 '  |  Backspace: Unready  |  Esc: Disconnect', S.W / 2, S.H - 12);
+        } else if (this._tournamentActive) {
+            ctx.fillStyle = '#f7d36f';
+            ctx.fillText((this._lobbyNotice || 'Tournament running...') + '  |  Esc: Disconnect', S.W / 2, S.H - 12);
         } else if (this._gameMode === 'draft') {
             const dq = this._slotCharQueues[this._mySlot];
             ctx.fillText('Enter: Pick character (' + dq.length + '/' + DRAFT_QUEUE_SIZE + ')  |  Backspace: Undo pick  |  Esc: Disconnect', S.W / 2, S.H - 12);
@@ -1279,12 +1497,15 @@ class MultiplayerScene {
             }
         }
 
-        // Rematch
+        // Rematch / continue
         ctx.font = '20px Arial'; ctx.fillStyle = '#aaa';
         const myR = this._rematchRequested[this._mySlot];
         const allR = this._readySlots.length >= 2 && this._readySlots.every(s => this._rematchRequested[s]);
 
-        if (allR) {
+        if (this._readySlots.length < 2) {
+            ctx.fillStyle = '#f7d36f';
+            ctx.fillText(this._lobbyNotice || 'Tournament complete! Press Enter to return to lobby.', S.W / 2, 350);
+        } else if (allR) {
             ctx.fillStyle = '#0c6';
             ctx.fillText('Everyone wants a rematch! Press Enter.', S.W / 2, 350);
         } else if (myR) {

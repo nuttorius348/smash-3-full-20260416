@@ -10,13 +10,15 @@ class InputState {
         this.jump    = false;
         this.attack  = false;
         this.special = false;
+        this.specialHeld = false;
         this.shield  = false;
         this.grab    = false;
     }
     reset() {
         this.moveX = 0; this.moveY = 0;
         this.jump = false; this.attack = false;
-        this.special = false; this.shield = false; this.grab = false;
+        this.special = false; this.specialHeld = false;
+        this.shield = false; this.grab = false;
     }
 }
 

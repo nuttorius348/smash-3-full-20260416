@@ -314,6 +314,7 @@ class InputManager {
         inp.jump    = jp.has(keys.jump);
         inp.attack  = jp.has(keys.attack);
         inp.special = jp.has(keys.special);
+        inp.specialHeld = down.has(keys.special);
         inp.grab    = jp.has(keys.grab);
 
         // Shield (held)
@@ -353,6 +354,7 @@ class InputManager {
         inp.jump    = this._isJustPressed(gp, map.jump);
         inp.attack  = this._isJustPressed(gp, map.attack);
         inp.special = this._isJustPressed(gp, map.special);
+        inp.specialHeld = this._isHeld(gp, map.special);
         inp.grab    = this._isJustPressed(gp, map.grab);
 
         // Shield = any shield button held

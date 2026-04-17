@@ -383,12 +383,19 @@ class CharacterSelectScene {
     }
 
     _getDeviceButtonRect(slotIdx) {
-        const slotW = 280;
-        const gap = 20;
-        const totalW = 4 * slotW + 3 * gap;
+        const layout = this._getSlotLayout();
+        const x = layout.startX + slotIdx * (layout.w + layout.gap);
+        return { x: x + 10, y: layout.y + 150, w: layout.w - 20, h: 24 };
+    }
+
+    _getSlotLayout() {
+        const w = 260;
+        const h = 170;
+        const gap = 16;
+        const totalW = 4 * w + 3 * gap;
         const startX = (S.W - totalW) / 2;
-        const x = startX + slotIdx * (slotW + gap);
-        return { x: x + 10, y: 400 + 150, w: slotW - 20, h: 24 };
+        const y = 380;
+        return { w, h, gap, totalW, startX, y };
     }
 
     _handleInput() {
@@ -632,17 +639,30 @@ class CharacterSelectScene {
     }
 
     _renderCharacterPortraits(ctx) {
-        const w = 115;
-        const h = 108;
-        const gap = 10;
-        const charsPerRow = 8;
-        const rowGap = 10;
+        const gap = 8;
+        const rowGap = 8;
         const startY = 95;
+        const slotTop = this._getSlotLayout().y;
+        const maxPortraitAreaH = Math.max(120, slotTop - startY - 16);
+
+        let charsPerRow = Math.min(this.characters.length, 9);
+        let rows = Math.ceil(this.characters.length / charsPerRow);
+        while (charsPerRow < this.characters.length && rows > 2) {
+            charsPerRow++;
+            rows = Math.ceil(this.characters.length / charsPerRow);
+        }
+
+        const w = Math.max(84, Math.min(112,
+            Math.floor((S.W - 120 - (charsPerRow - 1) * gap) / charsPerRow)
+        ));
+        const h = Math.max(72, Math.min(108,
+            Math.floor((maxPortraitAreaH - (rows - 1) * rowGap) / rows)
+        ));
 
         for (let i = 0; i < this.characters.length; i++) {
             const ch = this.characters[i];
             
-            // Grid layout: 4 characters per row
+            // Adaptive grid layout keeps all cards above player slots.
             const row = Math.floor(i / charsPerRow);
             const col = i % charsPerRow;
             const charsInRow = Math.min(charsPerRow, this.characters.length - row * charsPerRow);
@@ -670,15 +690,15 @@ class CharacterSelectScene {
 
             // Character name
             ctx.fillStyle = ch.color || '#fff';
-            ctx.font = 'bold 14px Arial';
+            ctx.font = 'bold 13px Arial';
             ctx.textAlign = 'center';
             ctx.fillText(ch.name.toUpperCase(), x + w / 2, y + h - 8);
 
             // Character sprite/portrait
             const portraitX = x + 6;
-            const portraitY = y + 10;
+            const portraitY = y + 8;
             const portraitW = w - 12;
-            const portraitH = h - 38;
+            const portraitH = h - 34;
             
             if (ch.data && ch.data.spriteLoaded && ch.data.spriteImage) {
                 // Draw actual character sprite
@@ -707,12 +727,12 @@ class CharacterSelectScene {
     }
 
     _renderPlayerSlots(ctx) {
-        const y = 360;
-        const w = 260;
-        const h = 170;
-        const gap = 16;
-        const totalW = 4 * w + 3 * gap;
-        const startX = (S.W - totalW) / 2;
+        const layout = this._getSlotLayout();
+        const y = layout.y;
+        const w = layout.w;
+        const h = layout.h;
+        const gap = layout.gap;
+        const startX = layout.startX;
 
         for (let i = 0; i < 4; i++) {
             const slot = this.slots[i];

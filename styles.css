@@ -147,6 +147,7 @@ input[type="checkbox"] { margin-right: 4px; accent-color: #6699cc; }
     color: #777;
     max-width: 640px;
 }
+.controls-help.hidden { display: none; }
 .controls-help table {
     width: 100%;
     border-collapse: collapse;
@@ -160,3 +161,8 @@ input[type="checkbox"] { margin-right: 4px; accent-color: #6699cc; }
 }
 .controls-help th { color: #aaa; }
 .controls-help p  { margin: 4px 0; color: #999; }
+
+#controlsBtn.active {
+    background: linear-gradient(135deg, #0c6, #0a4);
+    box-shadow: 0 6px 24px rgba(0, 180, 90, 0.5);
+}

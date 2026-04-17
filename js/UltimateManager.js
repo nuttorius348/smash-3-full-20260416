@@ -65,6 +65,7 @@ function _getComboKey(keyA, keyB) {
 class UltimateManager {
     constructor() {
         this._videosEnabled = true;
+        this._soundsEnabled = true;
 
         // ── State ────────────────────────────────────────────────
         this.active       = false;   // true while cutscene is running
@@ -95,6 +96,13 @@ class UltimateManager {
         this._videosEnabled = enabled !== false;
     }
 
+    setSoundEnabled(enabled) {
+        this._soundsEnabled = enabled !== false;
+        if (this._videoEl) {
+            this._videoEl.muted = !this._soundsEnabled;
+        }
+    }
+
     // ──────────────────────────────────────────────────────────────
     //  Video element setup
     // ──────────────────────────────────────────────────────────────
@@ -113,7 +121,7 @@ class UltimateManager {
             pointer-events: none;
         `;
         el.playsInline = true;
-        el.muted = false;
+        el.muted = !this._soundsEnabled;
         el.preload = 'auto';
         document.body.appendChild(el);
         this._videoEl = el;
