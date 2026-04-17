@@ -57,6 +57,7 @@ class KeyboardController {
         inp.jump    = jp.has(this.keys.jump);
         inp.attack  = jp.has(this.keys.attack);
         inp.special = jp.has(this.keys.special);
+        inp.specialHeld = down.has(this.keys.special);
         inp.grab    = jp.has(this.keys.grab);
 
         // Held

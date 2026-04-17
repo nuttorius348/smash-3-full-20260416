@@ -24,6 +24,11 @@ const HURT_SOUNDS = {
     epstein:   'assets/soundeffect_epstein.mp3',
     droid:     'assets/soundeffect_droid.mp3',
     bomber:    'assets/soundeffect_bomber.mp3',
+    sahur:     'assets/Sahur_soundeffect.mp3',
+};
+
+const CHARGE_SOUNDS = {
+    sahur: 'assets/Sahur_soundeffect.mp3',
 };
 
 const HIT_SRC = 'assets/soundeffect_hit.mp3';
@@ -59,6 +64,7 @@ const CHARACTER_SELECT_SOUNDS = {
     speed:     'assets/Speed_selected (mp3cut.net).mp3',
     trump:     'assets/Trump_selected (mp3cut.net).mp3',
     vaughan:   'assets/Vaughan_selected.mp3',
+    sahur:     'assets/Sahur_selected.mp3',
 };
 
 const HIT_VOLUME  = 0.45;
@@ -89,6 +95,8 @@ function makePool(src, vol) {
 
 class SFXManager {
     constructor() {
+        this._enabled = true;
+
         this._hitPool  = makePool(HIT_SRC, HIT_VOLUME);
         this._hitIdx   = 0;
 
@@ -98,6 +106,13 @@ class SFXManager {
             this._hurtPools[key] = makePool(src, vol);
         }
         this._hurtIdx = {};
+
+        this._chargePools = {};
+        this._chargeIdx = {};
+        for (const [key, src] of Object.entries(CHARGE_SOUNDS)) {
+            this._chargePools[key] = makePool(src, EVENT_VOLUME);
+            this._chargeIdx[key] = 0;
+        }
 
         this._eventPools = {};
         this._eventIdx = {};
@@ -120,6 +135,7 @@ class SFXManager {
      * @param {string} charKey — defender's character key (e.g. 'brawler')
      */
     playHit(charKey) {
+        if (!this._enabled) return;
         // Generic hit sound
         this._play(this._hitPool, '_hitIdx');
 
@@ -142,6 +158,7 @@ class SFXManager {
     playNewChallenger() { this._playEvent('newChallenger'); }
 
     playCharacterSelect(charKey) {
+        if (!this._enabled) return;
         const pool = this._selectPools[charKey];
         if (!pool) return;
         const idx = this._selectIdx[charKey] % pool.length;
@@ -152,9 +169,22 @@ class SFXManager {
         if (p && p.catch) p.catch(() => {});
     }
 
+    playCharge(charKey) {
+        if (!this._enabled) return;
+        const pool = this._chargePools[charKey];
+        if (!pool) return;
+        const idx = this._chargeIdx[charKey] % pool.length;
+        this._chargeIdx[charKey]++;
+        const a = pool[idx];
+        a.currentTime = 0;
+        const p = a.play();
+        if (p && p.catch) p.catch(() => {});
+    }
+
     /* ── internals ──────────────────────────────────────────── */
 
     _play(pool, idxProp) {
+        if (!this._enabled) return;
         const a = pool[this[idxProp] % pool.length];
         this[idxProp]++;
         a.currentTime = 0;
@@ -163,6 +193,7 @@ class SFXManager {
     }
 
     _playKeyed(pool, key) {
+        if (!this._enabled) return;
         const idx = this._hurtIdx[key] % pool.length;
         this._hurtIdx[key]++;
         const a = pool[idx];
@@ -172,6 +203,7 @@ class SFXManager {
     }
 
     _playEvent(key) {
+        if (!this._enabled) return;
         const pool = this._eventPools[key];
         if (!pool) return;
         const idx = this._eventIdx[key] % pool.length;
@@ -180,6 +212,14 @@ class SFXManager {
         a.currentTime = 0;
         const p = a.play();
         if (p && p.catch) p.catch(() => {});
+    }
+
+    setEnabled(enabled) {
+        this._enabled = enabled !== false;
+    }
+
+    isEnabled() {
+        return this._enabled;
     }
 }
 

@@ -32,6 +32,8 @@ const startBtn      = document.getElementById('startBtn');
 const galleryBtn    = document.getElementById('galleryBtn');
 const tierListBtn   = document.getElementById('tierListBtn');
 const multiplayerBtn = document.getElementById('multiplayerBtn');
+const controlsBtn   = document.getElementById('controlsBtn');
+const controlsPanel = document.getElementById('controlsPanel');
 
 // ── Device manager for controller auto-detection ────────────────
 const deviceMgr = new SMASH.DeviceManager();
@@ -53,6 +55,11 @@ let activeScene      = null;
 let lastMenuSettings = {};
 let lastConfigs      = [];
 
+function applyGlobalSoundSetting(enabled) {
+    if (SMASH.SFX && SMASH.SFX.setEnabled) SMASH.SFX.setEnabled(enabled !== false);
+    if (SMASH.Music && SMASH.Music.setEnabled) SMASH.Music.setEnabled(enabled !== false);
+}
+
 // ═════════════════════════════════════════════════════════════════
 //  SCENE TRANSITIONS
 // ═════════════════════════════════════════════════════════════════
@@ -69,7 +76,11 @@ function showMenu() {
     stopActiveScene();
     canvas.style.display  = 'none';
     menuDiv.style.display = 'flex';
+    if (controlsPanel) controlsPanel.classList.add('hidden');
+    if (controlsBtn) controlsBtn.classList.remove('active');
     startScan();
+    const soundsToggle = document.getElementById('soundsToggle');
+    if (soundsToggle) applyGlobalSoundSetting(!!soundsToggle.checked);
     SMASH.Music.play('main');
 }
 
@@ -277,16 +288,19 @@ function showTournament(settings) {
 /**
  * Start the Multiplayer flow.
  */
-function showMultiplayer() {
+function showMultiplayer(settings) {
     stopActiveScene();
     stopScan();
     menuDiv.style.display = 'none';
     canvas.style.display  = 'block';
     if (document.activeElement) document.activeElement.blur();
+    applyGlobalSoundSetting(!settings || settings.soundsEnabled !== false);
     SMASH.Music.play('multiplayer');
 
     const scene = new SMASH.MultiplayerScene(canvas, {
         deviceMgr: deviceMgr,
+        soundsEnabled: !settings || settings.soundsEnabled !== false,
+        ultimateVideos: !settings || settings.ultimateVideos !== false,
         onBack: () => {
             activeScene = null;
             showMenu();
@@ -340,6 +354,7 @@ function readMenuSettings() {
         staminaHP: parseInt(document.getElementById('staminaHP').value, 10) || 150,
         debug:     document.getElementById('debugToggle').checked,
         ultimateVideos: document.getElementById('ultimateVideosToggle').checked,
+        soundsEnabled: document.getElementById('soundsToggle').checked,
     };
 }
 
@@ -364,8 +379,17 @@ tierListBtn.addEventListener('click', () => {
 
 // MULTIPLAYER button
 multiplayerBtn.addEventListener('click', () => {
-    showMultiplayer();
+    showMultiplayer(readMenuSettings());
 });
+
+// CONTROLS button
+if (controlsBtn && controlsPanel) {
+    controlsBtn.addEventListener('click', () => {
+        const isHidden = controlsPanel.classList.contains('hidden');
+        controlsPanel.classList.toggle('hidden', !isHidden);
+        controlsBtn.classList.toggle('active', isHidden);
+    });
+}
 
 // Enter from menu
 window.addEventListener('keydown', e => {

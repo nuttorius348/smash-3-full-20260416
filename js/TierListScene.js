@@ -31,6 +31,12 @@ const TIER_ROWS = [
                 who: 'Von is the transformed form after two ultimates, turning him into a power monster.',
                 why: 'Placed in OP because this form gets massive pressure and overwhelming damage threat once online.'
             },
+            {
+                name: 'Sahur',
+                sprite: 'assets/sprite_Sahur.jfif',
+                who: 'Sahur is a bat-focused fighter that can quickly build meter and force explosive mid-game swings.',
+                why: 'Placed in OP for dominant charged pressure, very high kill threat, and explosive momentum from Bat Breaker setups.'
+            },
         ],
     },
     {

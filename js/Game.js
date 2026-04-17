@@ -7,7 +7,7 @@
  *  countdown → playing ⇄ paused
  *                      → gameover
  *
- *  countdown: 3-2-1-GO sequence, fighters frozen, camera active
+ *  countdown: portal pop-out intro + 3-2-1-GO sequence, fighters frozen
  *  playing:   normal gameplay loop
  *  paused:    overlay menu (Resume / Restart / Quit)
  *  gameover:  results + overlay menu (Rematch / Char Select / Menu)
@@ -63,7 +63,9 @@ class Game {
         this.hud     = new SMASH.HUD();
         this.projMgr = new SMASH.ProjectileManager();
         this.ultMgr  = new SMASH.UltimateManager();
+        this._soundsEnabled = settings.soundsEnabled !== false;
         this._ultimateVideos = settings.ultimateVideos !== false;
+        this.ultMgr.setSoundEnabled(this._soundsEnabled);
         this.ultMgr.setVideoEnabled(this._ultimateVideos);
 
         // ── Stage ─────────────────────────────────────────────────
@@ -143,6 +145,19 @@ class Game {
             subtitle: '',
             port: -1,
         };
+
+        // ── Match intro (portal pop-out) ─────────────────────────
+        this._intro = {
+            active: false,
+            timer: 0,
+            duration: 3.0,
+            playerCount: 0,
+            entries: [],
+            bursts: [],
+            shakeTimer: 0,
+            shakeStrength: 0,
+        };
+        this._setupBattleIntro();
 
         // ── Timing ────────────────────────────────────────────────
         this._lastTime = 0;
@@ -492,9 +507,172 @@ class Game {
         }
     }
 
+    _setupBattleIntro() {
+        const activePlayers = this.players.filter(p => !p.isWaveEnemy);
+        const liveFighters = this.fighters.filter(f => f && f.stocks > 0);
+        const mapBaseY = this._getMapBaseY();
+
+        this._intro.entries = [];
+        this._intro.bursts = [];
+        this._intro.shakeTimer = 0;
+        this._intro.shakeStrength = 0;
+        this._intro.duration = 1.2;
+        this._intro.timer = this._intro.duration;
+        this._intro.active = true;
+        this._intro.playerCount = Math.max(1, activePlayers.length);
+
+        for (let i = 0; i < liveFighters.length; i++) {
+            const f = liveFighters[i];
+            const endX = f._spawnX || f.x;
+            const endY = f._spawnY || f.y;
+            const startX = endX;
+            const startY = mapBaseY + f.height + 120;
+
+            this._intro.entries.push({
+                port: f.port,
+                startX,
+                startY,
+                endX,
+                endY,
+                portalY: mapBaseY + 10,
+                delay: i * 0.08,
+                popDuration: 0.72 + i * 0.06,
+                burstStart: 0.72,
+                popped: false,
+            });
+
+            f.x = startX;
+            f.y = startY;
+            f.vx = 0;
+            f.vy = 0;
+            f.grounded = true;
+            f.state = ST.AIRBORNE;
+        }
+    }
+
+    _getMapBaseY() {
+        let platformBottom = -Infinity;
+        if (this.stage && Array.isArray(this.stage.platforms)) {
+            for (const p of this.stage.platforms) {
+                if (!p || !p.rect) continue;
+                const b = p.rect.y + p.rect.h;
+                if (b > platformBottom) platformBottom = b;
+            }
+        }
+
+        if (!Number.isFinite(platformBottom)) {
+            const fallbackSpawnBottom = this.fighters.length
+                ? Math.max(...this.fighters.map(f => (f._spawnY || f.y) + f.height + 60))
+                : 680;
+            return fallbackSpawnBottom;
+        }
+
+        const blastBottom = this.stage && this.stage.blastZone
+            ? this.stage.blastZone.y + this.stage.blastZone.h - 30
+            : platformBottom + 200;
+        return Math.min(blastBottom, platformBottom);
+    }
+
+    _animateCountdownIntro(dt) {
+        if (!this._intro.active) return;
+
+        this._intro.timer = Math.max(0, this._intro.timer - dt);
+        const elapsed = this._intro.duration - this._intro.timer;
+
+        for (const e of this._intro.entries) {
+            const f = this.fighters.find(x => x.port === e.port);
+            if (!f) continue;
+
+            const tRaw = (elapsed - e.delay) / e.popDuration;
+            const t = Math.max(0, Math.min(1, tRaw));
+            const burstStart = e.burstStart != null ? e.burstStart : 0.72;
+
+            f.x = e.endX;
+            if (t < burstStart) {
+                const windup = burstStart > 0 ? t / burstStart : 1;
+                const rumble = Math.sin((windup + f.port * 0.17) * Math.PI * 10) * 1.8;
+                f.y = e.startY + rumble;
+            } else {
+                const bt = Math.max(0, Math.min(1, (t - burstStart) / Math.max(0.001, 1 - burstStart)));
+                const blast = 1 - Math.pow(1 - bt, 4);
+                const overshoot = Math.sin(bt * Math.PI) * 24 * (1 - bt);
+                f.y = e.startY + (e.endY - e.startY) * blast - overshoot;
+            }
+            f.vx = 0;
+            f.vy = 0;
+            f.grounded = true;
+            f.state = t < 0.95 ? ST.AIRBORNE : ST.IDLE;
+
+            if (t >= burstStart && !e.popped) {
+                e.popped = true;
+                this._intro.bursts.push({
+                    x: e.endX + f.width / 2,
+                    y: e.portalY,
+                    age: 0,
+                    life: 0.38,
+                    maxR: 104,
+                });
+                this._intro.shakeTimer = Math.max(this._intro.shakeTimer, 0.22);
+                this._intro.shakeStrength = Math.max(this._intro.shakeStrength, 13);
+            }
+        }
+
+        if (this._intro.bursts.length) {
+            for (const b of this._intro.bursts) b.age += dt;
+            this._intro.bursts = this._intro.bursts.filter(b => b.age < b.life);
+        }
+        if (this._intro.shakeTimer > 0) {
+            this._intro.shakeTimer = Math.max(0, this._intro.shakeTimer - dt);
+            this._intro.shakeStrength = Math.max(0, this._intro.shakeStrength - dt * 44);
+        }
+
+        if (this._intro.timer <= 0) {
+            this._intro.active = false;
+            for (const e of this._intro.entries) {
+                const f = this.fighters.find(x => x.port === e.port);
+                if (!f) continue;
+                f.x = e.endX;
+                f.y = e.endY;
+                f.vx = 0;
+                f.vy = 0;
+                f.grounded = true;
+                f.state = ST.IDLE;
+            }
+        }
+    }
+
+    _getIntroEntryForFighter(f) {
+        if (!f || !this._intro.active) return false;
+        const e = this._intro.entries.find(x => x.port === f.port);
+        return e || null;
+    }
+
+    _getIntroProgress(e) {
+        if (!e || !this._intro.active) return 1;
+        const elapsed = this._intro.duration - this._intro.timer;
+        const tRaw = (elapsed - e.delay) / e.popDuration;
+        return Math.max(0, Math.min(1, tRaw));
+    }
+
+    _getIntroClipYForFighter(f, cam) {
+        const e = this._getIntroEntryForFighter(f);
+        if (!e) return null;
+        const t = this._getIntroProgress(e);
+        if (t >= 1) return null;
+
+        const burstStart = e.burstStart != null ? e.burstStart : 0.72;
+        // Hard burst: completely hidden until eruption starts.
+        if (t < burstStart) return -999999;
+
+        const fy = e.portalY;
+        return (fy - cam.y) * cam.zoom + S.H / 2 + 7;
+    }
+
     // ── Countdown ────────────────────────────────────────────────
 
     _tickCountdown(dt) {
+        this._animateCountdownIntro(dt);
+
         const prevSec = Math.ceil(this._countdownTimer / 60);
         this._countdownTimer--;
         const sec = Math.ceil(this._countdownTimer / 60);
@@ -975,6 +1153,7 @@ class Game {
 
         this.projMgr.clear();
         this.ultMgr = new SMASH.UltimateManager();
+        this.ultMgr.setSoundEnabled(this._soundsEnabled);
         this.ultMgr.setVideoEnabled(this._ultimateVideos);
 
         // Re-link AI context
@@ -985,12 +1164,12 @@ class Game {
         }
 
         this._initStats();
-        this.state           = 'countdown';
         this._countdownTimer = 195;
         this._winner         = null;
         this._winTeam        = -1;
         this._menuIdx        = 0;
         this._matchTime      = 0;
+        this._setupBattleIntro();
 
         // ── Wave mode: start wave 1 ──────────────────────────────
         if (this.gameMode === 'wave') {
@@ -1016,6 +1195,18 @@ class Game {
         ctx.fillStyle = this.stage.bgColor || '#111';
         ctx.fillRect(0, 0, S.W, S.H);
 
+        let shakeX = 0;
+        let shakeY = 0;
+        if (this.state === 'countdown' && this._intro.shakeTimer > 0) {
+            const n = this._intro.shakeTimer / 0.18;
+            const amp = Math.max(0, this._intro.shakeStrength * n);
+            shakeX = (Math.random() * 2 - 1) * amp;
+            shakeY = (Math.random() * 2 - 1) * amp * 0.6;
+        }
+
+        ctx.save();
+        ctx.translate(shakeX, shakeY);
+
         // Stage (background layers + platforms)
         this.stage.render(ctx, cam);
 
@@ -1023,7 +1214,20 @@ class Game {
         this.projMgr.render(ctx, cam);
 
         // Fighters
-        for (const f of this.fighters) f.render(ctx, cam);
+        for (const f of this.fighters) {
+            const clipY = this._getIntroClipYForFighter(f, cam);
+            if (clipY != null) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(-4000, -4000, S.W + 8000, clipY + 4000);
+                ctx.clip();
+                f.render(ctx, cam);
+                ctx.restore();
+            } else {
+                f.render(ctx, cam);
+            }
+        }
+        ctx.restore();
 
         // HUD
         const modeInfo = {
@@ -1046,10 +1250,79 @@ class Game {
         if (this._koAlpha > 0) this._renderKO(ctx);
 
         // State overlays
-        if (this.state === 'countdown') this._renderCountdown(ctx);
+        if (this.state === 'countdown') {
+            this._renderBattleIntro(ctx);
+            this._renderCountdown(ctx);
+        }
         if (this.state === 'paused')    this._renderPause(ctx);
         if (this.state === 'movelist')  this._renderMoveList(ctx);
         if (this.state === 'gameover')  this._renderGameOver(ctx);
+    }
+
+    _renderBattleIntro(ctx) {
+        if (!this._intro.active) return;
+
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 120);
+
+        ctx.save();
+
+        // Global cinematic dim.
+        ctx.fillStyle = 'rgba(0,0,0,0.42)';
+        ctx.fillRect(0, 0, S.W, S.H);
+
+        // Portals at spawn points.
+        for (const e of this._intro.entries) {
+            const f = this.fighters.find(x => x.port === e.port);
+            if (!f || f.stocks <= 0) continue;
+
+            const t = this._getIntroProgress(e);
+            if (t >= 1) continue; // Portal collapses once fighter fully emerges.
+
+            const fx = e.endX + f.width / 2;
+            const fy = e.portalY;
+            const sx = (fx - this.camera.x) * this.camera.zoom + S.W / 2;
+            const sy = (fy - this.camera.y) * this.camera.zoom + S.H / 2;
+
+            const burstStart = e.burstStart != null ? e.burstStart : 0.72;
+            const emergence = t < burstStart
+                ? 0
+                : Math.max(0, Math.min(1, (t - burstStart) / Math.max(0.001, 1 - burstStart)));
+            const fade = 1 - emergence;
+            const base = (24 + pulse * 10) * (0.75 + fade * 0.55);
+            ctx.beginPath();
+            ctx.ellipse(sx, sy + 6, base * 1.5, base * 0.52, 0, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(88,194,255,${(0.24 * fade).toFixed(3)})`;
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.ellipse(sx, sy + 6, base * 1.1, base * 0.34, 0, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(153,235,255,${(0.82 * fade).toFixed(3)})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        // Burst rings when fighters pop out.
+        for (const b of this._intro.bursts) {
+            const p = Math.max(0, Math.min(1, b.age / b.life));
+            const r = 20 + (b.maxR - 20) * p;
+            const a = 1 - p;
+            const sx = (b.x - this.camera.x) * this.camera.zoom + S.W / 2;
+            const sy = (b.y - this.camera.y) * this.camera.zoom + S.H / 2;
+
+            ctx.beginPath();
+            ctx.arc(sx, sy, r, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(173,236,255,${(0.8 * a).toFixed(3)})`;
+            ctx.lineWidth = 5 - p * 3;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(sx, sy, r * 0.58, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(92,202,255,${(0.55 * a).toFixed(3)})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        ctx.restore();
     }
 
     _renderMiniCutscene(ctx) {
@@ -1515,7 +1788,23 @@ class Game {
      * Called by host after each frame to send to guest.
      */
     serializeState() {
-        const fighters = this.fighters.map(f => ({
+        const fighters = this.fighters.map(f => {
+            let currentAttackKey = null;
+            if (f.currentAttack) {
+                if (f.data && f.data.attacks) {
+                    for (const [atkKey, atk] of Object.entries(f.data.attacks)) {
+                        if (atk === f.currentAttack) {
+                            currentAttackKey = atkKey;
+                            break;
+                        }
+                    }
+                }
+                if (!currentAttackKey && f.data && f.data.ultimateAttack === f.currentAttack) {
+                    currentAttackKey = 'ultimateAttack';
+                }
+            }
+
+            return {
             // Position / physics
             x: f.x,
             y: f.y,
@@ -1541,6 +1830,7 @@ class Game {
 
             // Attack
             currentAttack: f.currentAttack ? f.currentAttack.name : null,
+            currentAttackKey,
             _atkPhase: f._atkPhase,
             _atkTimer: f._atkTimer,
 
@@ -1551,6 +1841,12 @@ class Game {
             // Visual
             inputDirection: f.inputDirection,
             _armorHitsLeft: f._armorHitsLeft,
+            _ultimatesUsed: f._ultimatesUsed || 0,
+            _vaughanVonForm: !!f._vaughanVonForm,
+            _sahurChargeFrames: f._sahurChargeFrames || 0,
+            _sahurChargeRatio: f._sahurChargeRatio || 0,
+            _sahurFullChargeFlash: f._sahurFullChargeFlash || 0,
+            _sahurFullChargeTriggered: !!f._sahurFullChargeTriggered,
 
             // Mode-specific
             staminaHP: f.staminaHP || 0,
@@ -1562,7 +1858,8 @@ class Game {
             height: f.height,
             charKey: f.data ? f.data.key : 'brawler',
             isWaveEnemy: this._waveEnemies.includes(f),
-        }));
+            };
+        });
 
         const projectiles = this.projMgr.list.map(p => ({
             x: p.x,
@@ -1606,6 +1903,20 @@ class Game {
             _countdownTimer: this._countdownTimer,
             _koAlpha: this._koAlpha,
             _koMsg: this._koMsg,
+            _intro: {
+                active: !!this._intro.active,
+                timer: this._intro.timer || 0,
+                duration: this._intro.duration || 3,
+                playerCount: this._intro.playerCount || 0,
+            },
+            _miniCutscene: {
+                active: !!this._miniCutscene.active,
+                timer: this._miniCutscene.timer || 0,
+                duration: this._miniCutscene.duration || 1.8,
+                title: this._miniCutscene.title || '',
+                subtitle: this._miniCutscene.subtitle || '',
+                port: this._miniCutscene.port != null ? this._miniCutscene.port : -1,
+            },
             gameMode: this.gameMode,
             _winner: this._winner ? this._winner.port : (this._winner === null ? null : this._winner),
             _winTeam: this._winTeam,
@@ -1632,6 +1943,21 @@ class Game {
         this._countdownTimer = netState._countdownTimer;
         this._koAlpha = netState._koAlpha || 0;
         this._koMsg = netState._koMsg || '';
+        if (netState._intro) {
+            this._intro.active = !!netState._intro.active;
+            this._intro.timer = netState._intro.timer || 0;
+            this._intro.duration = netState._intro.duration || 3;
+            this._intro.playerCount = netState._intro.playerCount || 0;
+        }
+        if (netState._miniCutscene) {
+            const src = netState._miniCutscene;
+            this._miniCutscene.active = !!src.active;
+            this._miniCutscene.timer = src.timer || 0;
+            this._miniCutscene.duration = src.duration || 1.8;
+            this._miniCutscene.title = src.title || '';
+            this._miniCutscene.subtitle = src.subtitle || '';
+            this._miniCutscene.port = src.port != null ? src.port : -1;
+        }
         if (netState._waveNumber != null) this._waveNumber = netState._waveNumber;
         if (netState._waveEnemiesLeft != null) this._waveEnemiesLeft = netState._waveEnemiesLeft;
         if (netState._waveSpawned != null) this._waveSpawned = netState._waveSpawned;
@@ -1693,9 +2019,27 @@ class Game {
             // Attack
             dst._atkPhase = src._atkPhase;
             dst._atkTimer = src._atkTimer;
-            if (src.currentAttack) {
+            if (src.currentAttackKey) {
+                if (src.currentAttackKey === 'ultimateAttack') {
+                    dst.currentAttack = (dst.data && dst.data.ultimateAttack) ? dst.data.ultimateAttack : null;
+                } else {
+                    dst.currentAttack = (dst.data && dst.data.attacks)
+                        ? (dst.data.attacks[src.currentAttackKey] || null)
+                        : null;
+                }
+            } else if (src.currentAttack) {
+                // Backward compatibility with older snapshots that only carried attack name.
                 if (!dst.currentAttack || dst.currentAttack.name !== src.currentAttack) {
-                    dst.currentAttack = dst.data.attacks[src.currentAttack] || null;
+                    let byName = null;
+                    if (dst.data && dst.data.attacks) {
+                        for (const atk of Object.values(dst.data.attacks)) {
+                            if (atk && atk.name === src.currentAttack) {
+                                byName = atk;
+                                break;
+                            }
+                        }
+                    }
+                    dst.currentAttack = byName;
                 }
             } else {
                 dst.currentAttack = null;
@@ -1708,6 +2052,15 @@ class Game {
             // Visual
             dst.inputDirection = src.inputDirection || { x: 0, y: 0 };
             dst._armorHitsLeft = src._armorHitsLeft || 0;
+            dst._ultimatesUsed = src._ultimatesUsed || 0;
+            if (src._vaughanVonForm && !dst._vaughanVonForm && dst.data && dst.data.key === 'vaughan') {
+                dst._activateVaughanVonForm();
+            }
+            dst._vaughanVonForm = !!src._vaughanVonForm;
+            dst._sahurChargeFrames = src._sahurChargeFrames || 0;
+            dst._sahurChargeRatio = src._sahurChargeRatio || 0;
+            dst._sahurFullChargeFlash = src._sahurFullChargeFlash || 0;
+            dst._sahurFullChargeTriggered = !!src._sahurFullChargeTriggered;
 
             // Mode-specific
             if (src.staminaHP != null) dst.staminaHP = src.staminaHP;

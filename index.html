@@ -70,6 +70,9 @@
         <label style="margin-left:20px">
             <input type="checkbox" id="ultimateVideosToggle" checked> Ultimate Videos
         </label>
+        <label style="margin-left:20px">
+            <input type="checkbox" id="soundsToggle" checked> Sounds
+        </label>
     </div>
 
     <!-- FIGHT button -->
@@ -78,6 +81,9 @@
     <!-- Multiplayer button -->
     <button id="multiplayerBtn" class="gallery-btn" style="margin-bottom:8px">MULTIPLAYER</button>
 
+    <!-- Controls button -->
+    <button id="controlsBtn" class="gallery-btn" style="margin-top:-4px; margin-bottom:8px">CONTROLS</button>
+
     <!-- Ultimate Gallery button -->
     <button id="galleryBtn" class="gallery-btn">ULTIMATE GALLERY</button>
 
@@ -85,7 +91,7 @@
     <button id="tierListBtn" class="gallery-btn" style="margin-top:8px">TIER LIST</button>
 
     <!-- Controls reference -->
-    <div class="controls-help">
+    <div id="controlsPanel" class="controls-help hidden">
         <h3>Controls</h3>
         <table>
             <tr>
@@ -124,6 +130,7 @@
         <p>Down Special = Focus Attack (super armor absorb)</p>
         <p>Ultimate replaces Special when meter is full</p>
         <p><em>Controllers auto-detected: Switch Pro, PS4, PS5, Xbox</em></p>
+        <p><em>Press CONTROLS again to hide.</em></p>
     </div>
 </div>
 
