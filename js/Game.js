@@ -224,6 +224,7 @@ class Game {
                     case 'keyboard2': ctrl = new SMASH.KeyboardController('ijkl');   break;
                     case 'gamepad':   ctrl = new SMASH.GamepadController(cfg.padIndex || cfg.port); break;
                     case 'ai':        ctrl = new SMASH.AIController(cfg.port, cfg.level || 5); break;
+                    case 'ollama_ai': ctrl = new SMASH.OllamaAIController(cfg.port, cfg.level || 5); break;
                     default:          ctrl = new SMASH.KeyboardController('wasd');
                 }
             }
@@ -232,7 +233,7 @@ class Game {
                 port:       cfg.port,
                 fighter:    fighter,
                 controller: ctrl,
-                isAI:       cfg.type === 'ai',
+                isAI:       cfg.type === 'ai' || cfg.type === 'ollama_ai',
                 characterKey: cfg.character || 'brawler',
             };
             this.players.push(player);
@@ -241,7 +242,7 @@ class Game {
 
         // Give AI references to the world
         for (const p of this.players) {
-            if (p.controller instanceof SMASH.AIController) {
+            if (p.controller && typeof p.controller.setContext === 'function') {
                 p.controller.setContext(this.fighters, this.stage, this.projMgr.list);
             }
         }
@@ -1239,6 +1240,7 @@ class Game {
                 : null,
         };
         this.hud.render(ctx, this.players, this._matchTime, modeInfo);
+        this._renderOllamaStatus(ctx);
 
         // Ultimate cutscene overlay
         this.ultMgr.render(ctx);
@@ -1257,6 +1259,52 @@ class Game {
         if (this.state === 'paused')    this._renderPause(ctx);
         if (this.state === 'movelist')  this._renderMoveList(ctx);
         if (this.state === 'gameover')  this._renderGameOver(ctx);
+    }
+
+    _renderOllamaStatus(ctx) {
+        const ollamaPlayers = this.players.filter(p => p && p.controller instanceof SMASH.OllamaAIController);
+        if (!ollamaPlayers.length) return;
+
+        let onlineCount = 0;
+        let pendingCount = 0;
+        for (const p of ollamaPlayers) {
+            if (!p.controller || typeof p.controller.getStatus !== 'function') continue;
+            const st = p.controller.getStatus();
+            if (st.online) onlineCount++;
+            if (st.pending) pendingCount++;
+        }
+
+        const allOnline = onlineCount === ollamaPlayers.length;
+        const label = allOnline
+            ? `OLLAMA: ONLINE (${onlineCount}/${ollamaPlayers.length})`
+            : `OLLAMA: OFFLINE (${onlineCount}/${ollamaPlayers.length})`;
+
+        ctx.save();
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
+        ctx.font = 'bold 14px Arial';
+
+        const x = S.W - 16;
+        const y = 12;
+        const padX = 10;
+        const padY = 6;
+        const textW = ctx.measureText(label).width;
+        const h = 24;
+
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.beginPath();
+        ctx.roundRect(x - textW - padX * 2, y - padY, textW + padX * 2, h, 7);
+        ctx.fill();
+
+        ctx.fillStyle = allOnline ? '#44dd66' : '#ff6666';
+        ctx.fillText(label, x - padX, y);
+
+        if (pendingCount > 0) {
+            ctx.font = '11px Arial';
+            ctx.fillStyle = '#cccccc';
+            ctx.fillText(`requests: ${pendingCount} pending`, x - padX, y + 15);
+        }
+        ctx.restore();
     }
 
     _renderBattleIntro(ctx) {

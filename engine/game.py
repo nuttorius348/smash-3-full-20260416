@@ -24,6 +24,7 @@ from input.controller import Controller, InputState
 from input.keyboard import KeyboardController
 from input.gamepad import GamepadController
 from input.ai_controller import AIController
+from input.claude_ai_controller import ClaudeAIController
 from stages.stage import Stage
 from stages.stage_library import get_stage
 
@@ -145,12 +146,21 @@ class Game:
             fighter.stocks = stocks
 
             ctrl_type = cfg.get("type", "ai")
-            is_ai = ctrl_type == "ai"
+            is_ai = ctrl_type in ("ai", "claude_ai")
 
             if ctrl_type == "keyboard":
                 controller = KeyboardController(layout_index=cfg.get("layout", i))
             elif ctrl_type == "gamepad":
                 controller = GamepadController(joystick_index=cfg.get("index", i))
+            elif ctrl_type == "claude_ai":
+                controller = ClaudeAIController(
+                    port=i,
+                    difficulty=cfg.get("difficulty", 5),
+                    model=cfg.get("model", "claude-opus-4-6"),
+                    provider=cfg.get("provider", "claude"),
+                    base_url=cfg.get("base_url", "http://127.0.0.1:11434"),
+                )
+                is_ai = True
             else:
                 controller = AIController(port=i, difficulty=cfg.get("difficulty", 5))
                 is_ai = True
@@ -202,7 +212,7 @@ class Game:
         # 1. Poll input & update fighters
         for player in self.players:
             # Give AI context
-            if isinstance(player.controller, AIController):
+            if hasattr(player.controller, "set_context"):
                 player.controller.set_context(fighters, self.stage)
 
             inp = player.controller.poll(events)
