@@ -66,6 +66,11 @@ canvas {
     margin-bottom: 16px;
     text-align: center;
 }
+.sub-mode-row {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
 .menu-section.row {
     display: flex;
     align-items: center;

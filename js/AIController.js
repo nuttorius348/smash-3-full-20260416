@@ -1,5 +1,5 @@
 /**
- * AIController.js — Behavior-tree CPU opponent with difficulty 1-10.
+ * AIController.js — Behavior-tree CPU opponent with difficulty 1-12.
  *
  * ══════════════════════════════════════════════════════════════════
  *  DIFFICULTY SCALING FORMULAE  (d = difficulty 1-9)
@@ -70,6 +70,24 @@ const S          = SMASH.Settings;
 function lerp(lo, hi, t) { return lo + (hi - lo) * t; }
 
 function buildProfile(d) {
+    // Level 12 (ADAPTIVE) — stage-aware + opponent-learning behavior.
+    if (d >= 12) {
+        return {
+            reactionFrames: 1,
+            accuracy:       1.00,
+            aggression:     0.92,
+            comboProb:      1.00,
+            shieldProb:     0.78,
+            dodgeSkill:     1.00,
+            edgeRecoveryIQ: 1.00,
+            ultThreshold:   0.98,
+            elite:          true,
+            adaptive:       true,
+            grabProb:       0.65,
+            pogoProb:       0.62,
+        };
+    }
+
     // Level 10 (ELITE) — hand-tuned, separate from the standard curve
     if (d >= 10) {
         return {
@@ -82,6 +100,7 @@ function buildProfile(d) {
             edgeRecoveryIQ: 1.00,
             ultThreshold:   0.95,
             elite:          true,   // flag for special BT behaviours
+            adaptive:       false,
             grabProb:       0.50,   // dedicated grab probability
             pogoProb:       0.55,   // pogo (down-air bounce) probability
         };
@@ -98,6 +117,7 @@ function buildProfile(d) {
         edgeRecoveryIQ: lerp(0.10, 1.00, t),
         ultThreshold:   lerp(0.00, 0.85, t),
         elite:          false,
+        adaptive:       false,
         grabProb:       0,
         pogoProb:       0,
     };
@@ -115,7 +135,7 @@ const BT_RUNNING = 2;
 class AIController {
     constructor(port, difficulty) {
         this.port       = port;
-        this.difficulty = Math.max(1, Math.min(10, difficulty || 5));
+        this.difficulty = Math.max(1, Math.min(12, difficulty || 5));
         this.profile    = buildProfile(this.difficulty);
 
         // World references (populated by Game.setContext)
@@ -142,6 +162,27 @@ class AIController {
         // Wander state (for constant movement)
         this._wanderDir    = Math.random() < 0.5 ? -1 : 1;
         this._wanderTimer  = 30 + Math.floor(Math.random() * 90);
+
+        // Adaptive learning state (Lv12)
+        this._learn = {
+            frames: 0,
+            shieldFrames: 0,
+            airFrames: 0,
+            jumpEvents: 0,
+            closeFrames: 0,
+            approachFrames: 0,
+            prevDist: null,
+            prevTargetAir: false,
+        };
+        this._memory = {
+            matches: 0,
+            jumpRate: 0,
+            shieldRate: 0,
+            airRate: 0,
+            approachRate: 0,
+        };
+        this._persistKey = null;
+        this._lastPersistFrame = 0;
     }
 
     // ── Context injection (called by Game) ───────────────────────
@@ -161,6 +202,11 @@ class AIController {
 
         // Re-evaluate target
         this._pickTarget(me);
+
+        if (this.profile.adaptive) {
+            this._updateAdaptiveModel(me, this._target);
+            this._adaptProfileFromLearning(me);
+        }
 
         // Elite AI: dynamically adjust aggression based on own damage %
         if (this.profile.elite) {
@@ -393,7 +439,7 @@ class AIController {
             // Desperation: always ult when on last stock
             if (me.stocks <= 1 && me.damagePercent > 100) {
                 const anyClose = this._fighters.some(f =>
-                    f.port !== this.port && f.isAlive &&
+                    this._isEnemy(me, f) && f.isAlive &&
                     Math.hypot(f.x - me.x, f.y - me.y) < 200);
                 if (anyClose) {
                     inp.special = true;
@@ -558,6 +604,10 @@ class AIController {
         const tgt = this._target;
         if (!tgt) return false;
 
+        if (this.profile.adaptive && this._btAdaptiveAttack(me, inp, decide)) {
+            return true;
+        }
+
         const dx   = tgt.x - me.x;
         const dy   = tgt.y - me.y;
         const dist = Math.hypot(dx, dy);
@@ -621,6 +671,22 @@ class AIController {
         const dx   = tgt.x - me.x;
         const dy   = tgt.y - me.y;
         const dist = Math.hypot(dx, dy);
+
+        // Lv12 stage-awareness: avoid drifting into blast zones while pathing.
+        if (this.profile.adaptive && this._stage && this._stage.blastZone) {
+            const bz = this._stage.blastZone;
+            const edgeMargin = 110;
+            if (me.x < bz.x + edgeMargin) {
+                inp.moveX = 1;
+                if (me.grounded && dy < -35) inp.jump = true;
+                return true;
+            }
+            if (me.x > bz.x + bz.w - edgeMargin) {
+                inp.moveX = -1;
+                if (me.grounded && dy < -35) inp.jump = true;
+                return true;
+            }
+        }
 
         if (dist < 100) return false; // too close, handled by attack node
 
@@ -799,12 +865,94 @@ class AIController {
         return false;
     }
 
+    _btAdaptiveAttack(me, inp, decide) {
+        if (!decide) return false;
+        const tgt = this._target;
+        if (!tgt) return false;
+
+        const dx = tgt.x - me.x;
+        const dy = tgt.y - me.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 230) return false;
+
+        const habits = this._getLearnedHabits();
+        const shieldsALot = habits.shieldRate > 0.26;
+        const jumpsALot = habits.jumpRate > 0.20;
+        const airborneALot = habits.airRate > 0.45;
+
+        // Ground game: mix all directional attacks/specials/grabs based on habits.
+        if (me.grounded) {
+            if (shieldsALot && dist < 80 && Math.random() < 0.55) {
+                inp.grab = true;
+                inp.moveX = dx > 0 ? 0.4 : -0.4;
+                return true;
+            }
+
+            if ((jumpsALot || airborneALot) && dy < -30 && Math.random() < 0.65) {
+                inp.moveY = -1;
+                inp.attack = true; // anti-air up tilt
+                return true;
+            }
+
+            if (dist > 140 && Math.random() < 0.45) {
+                // Ranged pressure.
+                inp.moveX = 0;
+                inp.moveY = 0;
+                inp.special = true;
+                return true;
+            }
+
+            const roll = Math.random();
+            if (roll < 0.22) {
+                inp.attack = true; // neutral
+            } else if (roll < 0.44) {
+                inp.moveX = dx > 0 ? 1 : -1;
+                inp.attack = true; // side
+            } else if (roll < 0.64) {
+                inp.moveY = -1;
+                inp.attack = true; // up
+            } else if (roll < 0.79) {
+                inp.moveY = 1;
+                inp.attack = true; // down
+            } else if (roll < 0.90) {
+                inp.moveX = dx > 0 ? 1 : -1;
+                inp.special = true; // side special pressure
+            } else {
+                inp.moveY = 1;
+                inp.special = true; // down special / armor / utility
+            }
+            return true;
+        }
+
+        // Air game: use all aerial directions and aerial specials.
+        if (dy < -45) {
+            inp.moveY = -1;
+            inp.attack = true; // uair
+        } else if (dy > 50) {
+            inp.moveY = 1;
+            inp.attack = true; // dair
+        } else if (Math.abs(dx) > 55) {
+            inp.moveX = dx > 0 ? 1 : -1;
+            inp.attack = true; // fair
+        } else {
+            inp.attack = true; // nair
+        }
+
+        if (Math.random() < 0.20) {
+            inp.attack = false;
+            inp.special = true;
+            if (dy < -35) inp.moveY = -1;
+        }
+
+        return true;
+    }
+
     // ══════════════════════════════════════════════════════════════
     //  HELPERS
     // ══════════════════════════════════════════════════════════════
 
     _pickTarget(me) {
-        const alive = this._fighters.filter(f => f.port !== this.port && f.isAlive);
+        const alive = this._fighters.filter(f => this._isEnemy(me, f) && f.isAlive);
         if (!alive.length) { this._target = null; return; }
 
         const d = this.difficulty;
@@ -839,10 +987,24 @@ class AIController {
     _countNearbyOpponents(me, radius) {
         let count = 0;
         for (const f of this._fighters) {
-            if (f.port === this.port || !f.isAlive) continue;
+            if (!this._isEnemy(me, f) || !f.isAlive) continue;
             if (Math.hypot(f.x - me.x, f.y - me.y) < radius) count++;
         }
         return count;
+    }
+
+    _isEnemy(me, other) {
+        if (!me || !other) return false;
+        if (other.port === this.port) return false;
+
+        const myTeam = Number.isFinite(me.team) ? me.team : -1;
+        const otherTeam = Number.isFinite(other.team) ? other.team : -1;
+
+        // Team IDs are only assigned in team battle mode.
+        if (myTeam >= 0 && otherTeam >= 0) {
+            return myTeam !== otherTeam;
+        }
+        return true;
     }
 
     _getNearestPlatformCenter(me) {
@@ -866,6 +1028,122 @@ class AIController {
             inp.attack  = false;
             inp.special = false;
             inp.shield  = false;
+        }
+    }
+
+    _updateAdaptiveModel(me, tgt) {
+        if (!tgt) return;
+
+        this._ensureAdaptiveMemoryLoaded(me, tgt);
+
+        const L = this._learn;
+        L.frames++;
+
+        const dist = Math.hypot((tgt.x || 0) - (me.x || 0), (tgt.y || 0) - (me.y || 0));
+        if (dist < 160) L.closeFrames++;
+
+        if (tgt.state === 'shield') L.shieldFrames++;
+        if (tgt.isAirborne) L.airFrames++;
+        if (tgt.isAirborne && !L.prevTargetAir) L.jumpEvents++;
+
+        if (L.prevDist != null && dist < L.prevDist - 2) L.approachFrames++;
+        L.prevDist = dist;
+        L.prevTargetAir = !!tgt.isAirborne;
+
+        if (this._frameCounter - this._lastPersistFrame > 900) {
+            this._persistAdaptiveMemory();
+            this._lastPersistFrame = this._frameCounter;
+        }
+    }
+
+    _adaptProfileFromLearning(me) {
+        const h = this._getLearnedHabits();
+
+        // More shields if the opponent is frequently in your face.
+        this.profile.shieldProb = Math.max(0.45, Math.min(0.9, 0.58 + h.approachRate * 0.4));
+
+        // More grabs when the opponent shields a lot.
+        this.profile.grabProb = Math.max(0.35, Math.min(0.9, 0.45 + h.shieldRate * 0.7));
+
+        // Extra anti-air aggression when the opponent lives airborne.
+        const antiAirBias = Math.max(h.airRate, h.jumpRate);
+        this.profile.comboProb = Math.max(0.88, Math.min(1.0, 0.9 + antiAirBias * 0.2));
+
+        // Survival-aware aggression still applies.
+        const myPct = me.damagePercent || 0;
+        if (myPct > 160) this.profile.aggression = 0.42;
+        else if (myPct > 110) this.profile.aggression = 0.68;
+        else this.profile.aggression = 0.88 + Math.min(0.1, h.approachRate * 0.12);
+    }
+
+    _getLearnedHabits() {
+        const L = this._learn;
+        const frames = Math.max(1, L.frames);
+        const session = {
+            jumpRate: L.jumpEvents / frames,
+            shieldRate: L.shieldFrames / frames,
+            airRate: L.airFrames / frames,
+            approachRate: L.approachFrames / frames,
+        };
+
+        if (!this._memory || !this._memory.matches) return session;
+
+        // Blend persisted matchup memory with current-game observations.
+        const memW = Math.min(0.6, 0.18 + this._memory.matches * 0.08);
+        const sesW = 1 - memW;
+        return {
+            jumpRate: session.jumpRate * sesW + this._memory.jumpRate * memW,
+            shieldRate: session.shieldRate * sesW + this._memory.shieldRate * memW,
+            airRate: session.airRate * sesW + this._memory.airRate * memW,
+            approachRate: session.approachRate * sesW + this._memory.approachRate * memW,
+        };
+    }
+
+    _ensureAdaptiveMemoryLoaded(me, tgt) {
+        if (typeof localStorage === 'undefined') return;
+        const key = `smash3_ai12_${me.data?.key || 'unknown'}_vs_${tgt.data?.key || 'unknown'}`;
+        if (this._persistKey === key) return;
+
+        this._persistKey = key;
+        this._memory = { matches: 0, jumpRate: 0, shieldRate: 0, airRate: 0, approachRate: 0 };
+
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return;
+            this._memory.matches = Math.max(0, Number(parsed.matches) || 0);
+            this._memory.jumpRate = Math.max(0, Number(parsed.jumpRate) || 0);
+            this._memory.shieldRate = Math.max(0, Number(parsed.shieldRate) || 0);
+            this._memory.airRate = Math.max(0, Number(parsed.airRate) || 0);
+            this._memory.approachRate = Math.max(0, Number(parsed.approachRate) || 0);
+        } catch {
+            // Ignore malformed local memory and relearn naturally.
+        }
+    }
+
+    _persistAdaptiveMemory() {
+        if (typeof localStorage === 'undefined' || !this._persistKey) return;
+
+        const h = this._getLearnedHabits();
+        const m = this._memory || { matches: 0, jumpRate: 0, shieldRate: 0, airRate: 0, approachRate: 0 };
+        const nextMatches = Math.min(50, (m.matches || 0) + 1);
+        const oldW = Math.max(0, nextMatches - 1) / nextMatches;
+        const newW = 1 / nextMatches;
+
+        const merged = {
+            matches: nextMatches,
+            jumpRate: (m.jumpRate || 0) * oldW + h.jumpRate * newW,
+            shieldRate: (m.shieldRate || 0) * oldW + h.shieldRate * newW,
+            airRate: (m.airRate || 0) * oldW + h.airRate * newW,
+            approachRate: (m.approachRate || 0) * oldW + h.approachRate * newW,
+        };
+
+        this._memory = merged;
+        try {
+            localStorage.setItem(this._persistKey, JSON.stringify(merged));
+        } catch {
+            // Storage may be blocked; continue without persistence.
         }
     }
 }

@@ -40,6 +40,7 @@ class UltimateGalleryScene {
             { name: 'Fazbear + Lazer',   video: 'assets/ultimate_fazbearlazer.mp4',   color: '#ffd700', ultName: 'Super Saiyan Sumpreme' },
             { name: 'Nutsak + Kirky',    video: 'assets/ultimate_kirkynutsak.mp4',    color: '#ffd700', ultName: 'Turning Point Debate' },
             { name: 'Kiddo + Speed',     video: 'assets/ultimate_kiddospeed.mp4',     color: '#ffd700', ultName: 'Brainrot Overload' },
+            { name: 'Sahur + Vaughan',   video: 'assets/Ultimate_sahurvaughan.mp4',   color: '#ffd700', ultName: 'batznglock' },
         ];
 
         for (const combo of comboUltimates) {

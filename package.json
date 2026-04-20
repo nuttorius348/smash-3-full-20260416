@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server/multiplayer-server.js 8080",
+    "start:web": "node server/multiplayer-server.js 8080",
+    "start:web:alt": "node server/multiplayer-server.js 8081"
   },
   "repository": {
     "type": "git",

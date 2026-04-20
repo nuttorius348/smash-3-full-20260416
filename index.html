@@ -39,6 +39,15 @@
             <option value="draft">Draft</option>
             <option value="tournament">Tournament</option>
         </select>
+        <div id="draftModeRow" class="sub-mode-row" style="margin-top:8px; display:none;">
+            <label>Draft Type:
+                <select id="draftControlMode">
+                    <option value="pvai">Player vs AI (Normal)</option>
+                    <option value="player_all">Player Drafts Both (You play vs AI)</option>
+                    <option value="coach">Coach Draft (You pick both, AI vs AI)</option>
+                </select>
+            </label>
+        </div>
     </div>
 
     <!-- Stage select -->
@@ -163,6 +172,7 @@
 <script src="js/KeyboardController.js"></script>
 <script src="js/GamepadController.js"></script>
 <script src="js/AIController.js"></script>
+<script src="js/OllamaAIController.js"></script>
 <script src="js/NetworkController.js"></script>
 
 <!-- 6. UI / Systems -->

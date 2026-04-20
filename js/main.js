@@ -191,9 +191,13 @@ function showDraft(settings) {
     canvas.style.display  = 'block';
     if (document.activeElement) document.activeElement.blur();
 
+    const draftControlMode = (lastMenuSettings && lastMenuSettings.draftControlMode) || 'pvai';
+    const isCoachDraft = draftControlMode === 'coach';
+    const isPlayerDraftsBoth = draftControlMode === 'player_all';
+
     const scene = new SMASH.DraftScene(canvas, deviceMgr, {
         p1Config: { type: 'human' },
-        p2Config: { type: 'ai', level: 5 },
+        p2Config: (isCoachDraft || isPlayerDraftsBoth) ? { type: 'human' } : { type: 'ai', level: 5 },
         stageKey: lastMenuSettings.stageKey || 'battlefield',
         onDone: (p1Queue, p2Queue, p1Cfg, p2Cfg) => {
             activeScene = null;
@@ -218,23 +222,26 @@ function startDraftGame(p1Queue, p2Queue, p1Cfg, p2Cfg, settings) {
     menuDiv.style.display = 'none';
     if (document.activeElement) document.activeElement.blur();
 
+    const forceAIVsAI = settings && settings.draftControlMode === 'coach';
+    const forceP2AI = settings && settings.draftControlMode === 'player_all';
+
     // Build player configs — each player starts with their first drafted char
     const configs = [
         {
             port: 0,
             character: p1Queue[0],
-            type: p1Cfg.type === 'ai' ? 'ai' : undefined,
+            type: (forceAIVsAI || p1Cfg.type === 'ai') ? 'ai' : undefined,
             level: p1Cfg.level || 5,
             team: -1,
-            ...(p1Cfg.type !== 'ai' ? { deviceConfig: { type: SMASH.CONTROLLER_TYPES.KEYBOARD, layout: 'wasd' } } : {}),
+            ...((forceAIVsAI || p1Cfg.type === 'ai') ? {} : { deviceConfig: { type: SMASH.CONTROLLER_TYPES.KEYBOARD, layout: 'wasd' } }),
         },
         {
             port: 1,
             character: p2Queue[0],
-            type: p2Cfg.type === 'ai' ? 'ai' : undefined,
+            type: (forceAIVsAI || forceP2AI || p2Cfg.type === 'ai') ? 'ai' : undefined,
             level: p2Cfg.level || 5,
             team: -1,
-            ...(p2Cfg.type !== 'ai' ? { deviceConfig: { type: SMASH.CONTROLLER_TYPES.KEYBOARD, layout: 'arrows' } } : {}),
+            ...((forceAIVsAI || forceP2AI || p2Cfg.type === 'ai') ? {} : { deviceConfig: { type: SMASH.CONTROLLER_TYPES.KEYBOARD, layout: 'arrows' } }),
         },
     ];
 
@@ -349,6 +356,7 @@ function handleGameExit(reason) {
 function readMenuSettings() {
     return {
         gameMode:  document.getElementById('gameModeSelect').value,
+        draftControlMode: document.getElementById('draftControlMode') ? document.getElementById('draftControlMode').value : 'pvai',
         stageKey:  document.getElementById('stageSelect').value,
         stocks:    parseInt(document.getElementById('stockCount').value, 10) || 3,
         staminaHP: parseInt(document.getElementById('staminaHP').value, 10) || 150,
@@ -398,6 +406,16 @@ window.addEventListener('keydown', e => {
         launchGameMode(readMenuSettings());
     }
 });
+
+const gameModeSelect = document.getElementById('gameModeSelect');
+const draftModeRow = document.getElementById('draftModeRow');
+if (gameModeSelect && draftModeRow) {
+    const syncDraftControls = () => {
+        draftModeRow.style.display = gameModeSelect.value === 'draft' ? 'inline-flex' : 'none';
+    };
+    gameModeSelect.addEventListener('change', syncDraftControls);
+    syncDraftControls();
+}
 
 // Controller connect/disconnect
 window.addEventListener('gamepadconnected',    () => deviceMgr.scan());

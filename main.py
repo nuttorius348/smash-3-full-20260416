@@ -6,6 +6,8 @@ Usage:
     python main.py --ai-only              # 4 AI players
     python main.py --stage wide_arena     # choose stage
     python main.py --difficulty 9         # set AI difficulty (1-9)
+    python main.py --ai-backend claude    # use Claude AI with fallback
+    python main.py --ai-backend ollama    # use local Ollama model with fallback
     python main.py --stocks 5             # stocks per player
     python main.py --debug                # show hitboxes/hurtboxes
 """
@@ -29,6 +31,15 @@ def parse_args() -> argparse.Namespace:
                         help="Stage to play on")
     parser.add_argument("--difficulty", type=int, default=5,
                         help="AI difficulty (1-9)")
+    parser.add_argument("--ai-backend", type=str, default="classic",
+                        choices=["classic", "claude", "ollama"],
+                        help="AI backend for CPU players")
+    parser.add_argument("--claude-model", type=str, default="claude-opus-4-6",
+                        help="Claude model name when --ai-backend claude is used")
+    parser.add_argument("--ollama-model", type=str, default="llama3",
+                        help="Ollama model name when --ai-backend ollama is used")
+    parser.add_argument("--ollama-url", type=str, default="http://127.0.0.1:11434",
+                        help="Ollama base URL when --ai-backend ollama is used")
     parser.add_argument("--stocks", type=int, default=3,
                         help="Stocks per player")
     parser.add_argument("--total-players", type=int, default=4,
@@ -71,8 +82,32 @@ def build_player_configs(args: argparse.Namespace) -> list[dict]:
 
     # AI players to fill remaining slots
     for i in range(total - humans):
-        configs.append({"type": "ai", "difficulty": difficulty})
-        print(f"[SETUP] Player {humans+i+1}: AI (difficulty {difficulty})")
+        if args.ai_backend == "claude":
+            configs.append({
+                "type": "claude_ai",
+                "difficulty": difficulty,
+                "model": args.claude_model,
+                "provider": "claude",
+            })
+            print(
+                f"[SETUP] Player {humans+i+1}: Claude AI "
+                f"(model {args.claude_model}, fallback diff {difficulty})"
+            )
+        elif args.ai_backend == "ollama":
+            configs.append({
+                "type": "claude_ai",
+                "difficulty": difficulty,
+                "model": args.ollama_model,
+                "provider": "ollama",
+                "base_url": args.ollama_url,
+            })
+            print(
+                f"[SETUP] Player {humans+i+1}: Ollama AI "
+                f"(model {args.ollama_model}, url {args.ollama_url}, fallback diff {difficulty})"
+            )
+        else:
+            configs.append({"type": "ai", "difficulty": difficulty})
+            print(f"[SETUP] Player {humans+i+1}: AI (difficulty {difficulty})")
 
     return configs
 

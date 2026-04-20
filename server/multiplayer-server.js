@@ -28,7 +28,124 @@ const MIME = {
     '.webm': 'video/webm',
 };
 
-const httpServer = http.createServer((req, res) => {
+const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3';
+const OLLAMA_HOST = process.env.OLLAMA_HOST || '127.0.0.1';
+const OLLAMA_PORT = parseInt(process.env.OLLAMA_PORT || '11434', 10);
+
+function readJsonBody(req) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        let size = 0;
+        req.on('data', (chunk) => {
+            size += chunk.length;
+            if (size > 1024 * 1024) {
+                reject(new Error('Body too large'));
+                req.destroy();
+                return;
+            }
+            chunks.push(chunk);
+        });
+        req.on('end', () => {
+            try {
+                const text = Buffer.concat(chunks).toString('utf8');
+                resolve(text ? JSON.parse(text) : {});
+            } catch (err) {
+                reject(err);
+            }
+        });
+        req.on('error', reject);
+    });
+}
+
+function extractActionFromText(text) {
+    const fallback = { move_x: 0, move_y: 0, jump: false, attack: false, special: false, shield: false, grab: false };
+    if (!text || typeof text !== 'string') return fallback;
+
+    let cleaned = text.trim();
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+        cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+    }
+
+    try {
+        const obj = JSON.parse(cleaned);
+        return {
+            move_x: Number.isFinite(Number(obj.move_x)) ? Math.max(-1, Math.min(1, Number(obj.move_x))) : 0,
+            move_y: Number.isFinite(Number(obj.move_y)) ? Math.max(-1, Math.min(1, Number(obj.move_y))) : 0,
+            jump: !!obj.jump,
+            attack: !!obj.attack,
+            special: !!obj.special,
+            shield: !!obj.shield,
+            grab: !!obj.grab,
+        };
+    } catch {
+        return fallback;
+    }
+}
+
+function queryOllamaForAction(state, model) {
+    return new Promise((resolve, reject) => {
+        const prompt = `You are playing a smash-style platform fighter game.\n\nGame state:\n- Your position: ${JSON.stringify(state.ai_pos || null)}\n- Enemy position: ${JSON.stringify(state.enemy_pos || null)}\n- Your damage: ${state.ai_damage || 0}%\n- Enemy damage: ${state.enemy_damage || 0}%\n- Your stocks: ${state.ai_stocks || 0}\n- Enemy stocks: ${state.enemy_stocks || 0}\n- Stage bounds: ${JSON.stringify(state.stage_bounds || null)}\n- On ground: ${!!state.ai_grounded}\n- Enemy airborne: ${!!state.enemy_airborne}\n\nRespond ONLY with JSON: {"move_x":-1|0|1,"move_y":-1|0|1,"jump":true|false,"attack":true|false,"special":true|false,"shield":true|false,"grab":true|false}.`;
+
+        const body = JSON.stringify({
+            model: model || DEFAULT_OLLAMA_MODEL,
+            prompt,
+            stream: false,
+            options: { temperature: 0.2 },
+        });
+
+        const req = http.request({
+            hostname: OLLAMA_HOST,
+            port: OLLAMA_PORT,
+            path: '/api/generate',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(body),
+            },
+            timeout: 1800,
+        }, (resp) => {
+            const chunks = [];
+            resp.on('data', (d) => chunks.push(d));
+            resp.on('end', () => {
+                try {
+                    const raw = Buffer.concat(chunks).toString('utf8');
+                    const parsed = JSON.parse(raw);
+                    const text = parsed && typeof parsed.response === 'string' ? parsed.response : '';
+                    resolve(extractActionFromText(text));
+                } catch (err) {
+                    reject(err);
+                }
+            });
+        });
+
+        req.on('timeout', () => req.destroy(new Error('Ollama timeout')));
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+    });
+}
+
+const httpServer = http.createServer(async (req, res) => {
+    if (req.method === 'POST' && req.url && req.url.startsWith('/api/ollama-action')) {
+        try {
+            const body = await readJsonBody(req);
+            const model = (body && typeof body.model === 'string' && body.model.trim()) ? body.model.trim() : DEFAULT_OLLAMA_MODEL;
+            const action = await queryOllamaForAction(body || {}, model);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, model, action }));
+        } catch (err) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                ok: false,
+                error: err && err.message ? err.message : 'ollama_error',
+                action: { move_x: 0, move_y: 0, jump: false, attack: false, special: false, shield: false, grab: false },
+            }));
+        }
+        return;
+    }
+
     let urlPath = decodeURIComponent(req.url.split('?')[0]);
     if (urlPath === '/') urlPath = '/index.html';
     const filePath = path.join(GAME_ROOT, urlPath);

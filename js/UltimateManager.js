@@ -52,6 +52,7 @@ const COMBO_ULTIMATES = {
     'brawler+fazbear':   { video: 'assets/ultimate_fazbearlazer.mp4',   name: 'Super Saiyan Sumpreme' },
     'kirky+speedster':   { video: 'assets/ultimate_kirkynutsak.mp4',    name: 'Turning Point Debate' },
     'kiddo+speed':       { video: 'assets/ultimate_kiddospeed.mp4',     name: 'Brainrot Overload' },
+    'sahur+vaughan':     { video: 'assets/Ultimate_sahurvaughan.mp4',   name: 'batznglock' },
 };
 
 function _getComboKey(keyA, keyB) {

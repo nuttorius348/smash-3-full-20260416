@@ -87,7 +87,7 @@ class AIController(Controller):
         me = self._self_fighter
         if me is None:
             return
-        alive = [f for f in self._fighters if f.port != self.port and f.is_alive]
+        alive = [f for f in self._fighters if self._is_enemy(me, f) and f.is_alive]
         if not alive:
             self._target = None
             return
@@ -102,6 +102,19 @@ class AIController(Controller):
             # Random target, stick to it for a while
             if self._target is None or not self._target.is_alive or random.random() < 0.02:
                 self._target = random.choice(alive)
+
+    def _is_enemy(self, me: Fighter, other: Fighter) -> bool:
+        if other.port == self.port:
+            return False
+
+        my_team = getattr(me, "team", -1)
+        other_team = getattr(other, "team", -1)
+
+        # Team IDs are assigned in team mode; if both have a team,
+        # only opposite-team fighters are valid targets.
+        if isinstance(my_team, int) and isinstance(other_team, int) and my_team >= 0 and other_team >= 0:
+            return my_team != other_team
+        return True
 
     # ------------------------------------------------------------------
     def _make_decision(self, me: Fighter) -> None:
