@@ -16,7 +16,7 @@
  *    • active (in/out)
  *    • characterKey (selected character)
  *    • controllerType ('human', 'ai')
- *    • aiDifficulty (1-9)
+ *    • aiDifficulty (1-13)
  *    • deviceId (assigned controller)
  *    • ready (boolean)
  *
@@ -86,8 +86,8 @@ class PlayerSlot {
 
     adjustAIDifficulty(delta) {
         if (this.ready || this.controllerType !== 'ai') return;
-        // 1-10 = classic scripted AI, 11 = real Ollama AI, 12 = adaptive learning AI.
-        this.aiDifficulty = Math.max(1, Math.min(12, this.aiDifficulty + delta));
+        // 1-10 = classic scripted AI, 11 = Ollama AI, 12 = adaptive scripted AI, 13 = learned Q-AI.
+        this.aiDifficulty = Math.max(1, Math.min(13, this.aiDifficulty + delta));
     }
 
     cycleTeam(dir) {
@@ -117,10 +117,11 @@ class PlayerSlot {
     getConfig(deviceList, gameMode) {
         if (this.controllerType === 'ai') {
             const useOllama = this.aiDifficulty === 11;
+            const useLearnedQ = this.aiDifficulty >= 13;
             return {
                 port: this.port,
                 character: this.characterKey,
-                type: useOllama ? 'ollama_ai' : 'ai',
+                type: useLearnedQ ? 'learned_ai' : (useOllama ? 'ollama_ai' : 'ai'),
                 level: useOllama ? 10 : Math.min(12, this.aiDifficulty),
                 team: gameMode === 'team' ? this.team : -1,
             };
@@ -779,13 +780,20 @@ class CharacterSelectScene {
             // Controller type
             ctx.fillStyle = '#ccc';
             ctx.font = '16px Arial';
-            const ctrlText = slot.controllerType === 'ai'
-                ? (slot.aiDifficulty === 11
-                    ? 'AI Difficulty: OLLAMA (LLAMA3)'
-                    : (slot.aiDifficulty >= 12
-                        ? 'AI Difficulty: ADAPTIVE LEARNING'
-                        : (slot.aiDifficulty >= 10 ? 'AI ELITE ★' : `AI Level ${slot.aiDifficulty}`)))
-                : 'HUMAN';
+            let ctrlText = 'HUMAN';
+            if (slot.controllerType === 'ai') {
+                if (slot.aiDifficulty === 11) {
+                    ctrlText = 'AI Difficulty: OLLAMA (LLAMA3)';
+                } else if (slot.aiDifficulty >= 13) {
+                    ctrlText = 'AI Difficulty: LEARNED Q-AI';
+                } else if (slot.aiDifficulty >= 12) {
+                    ctrlText = 'AI Difficulty: ADAPTIVE SCRIPTED';
+                } else if (slot.aiDifficulty >= 10) {
+                    ctrlText = 'AI ELITE ★';
+                } else {
+                    ctrlText = `AI Level ${slot.aiDifficulty}`;
+                }
+            }
             ctx.fillText(ctrlText, x + w / 2, y + 90);
 
             // Team badge (team mode only)
@@ -856,9 +864,9 @@ class CharacterSelectScene {
         ctx.fillStyle = '#8ab';
         ctx.font = '13px Arial';
         if (this._gameMode === 'team') {
-            ctx.fillText('R/F: Device  •  Q/E: AI (11 = OLLAMA, 12 = ADAPTIVE)  •  T/G: Team', S.W / 2, 642);
+            ctx.fillText('R/F: Device  •  Q/E: AI (11 = OLLAMA, 12 = ADAPTIVE, 13 = LEARNED)  •  T/G: Team', S.W / 2, 642);
         } else {
-            ctx.fillText('R/F: Device  •  Q/E: AI Difficulty (11 = OLLAMA, 12 = ADAPTIVE)', S.W / 2, 642);
+            ctx.fillText('R/F: Device  •  Q/E: AI Difficulty (11 = OLLAMA, 12 = ADAPTIVE, 13 = LEARNED)', S.W / 2, 642);
         }
         ctx.restore();
     }

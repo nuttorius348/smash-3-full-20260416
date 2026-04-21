@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=1280, height=720">
     <title>SMASH 3</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs/dist/tf.min.js"></script>
 </head>
 <body>
 
@@ -26,7 +27,9 @@
 <!-- ═══════════════════════════════════════════════════════════════ -->
 <div id="menu" class="overlay">
 
-    <h1>SMASH 3</h1>
+    <div id="menuContent" class="menu-content">
+
+    <h1 class="menu-logo" aria-label="SMASH 3">SMASH 3</h1>
 
     <!-- Game Mode -->
     <div class="menu-section">
@@ -84,20 +87,80 @@
         </label>
     </div>
 
-    <!-- FIGHT button -->
-    <button id="startBtn" class="start-btn">FIGHT!</button>
+    <!-- AI training settings -->
+    <div id="aiTrainingMenuSection" class="menu-section ai-training-section">
+        <h2>AI Training</h2>
+        <div class="ai-training-row">
+            <label>
+                <input type="checkbox" id="aiTrainingEnabled" checked>
+                Enable Q-Learning Trainer
+            </label>
+        </div>
+        <div class="ai-training-row">
+            <label>Training Speed:
+                <select id="aiTrainingSpeed">
+                    <option value="1" selected>1x (normal)</option>
+                    <option value="5">5x (fast reset + render skip)</option>
+                    <option value="10">10x (turbo reset + render skip)</option>
+                </select>
+            </label>
+        </div>
 
-    <!-- Multiplayer button -->
-    <button id="multiplayerBtn" class="gallery-btn" style="margin-bottom:8px">MULTIPLAYER</button>
+        <div class="ai-training-knobs">
+            <label class="ai-knob-item">Archive Mix Chance
+                <input type="number" id="aiArchiveMixChance" min="0" max="1" step="0.05" value="0.35">
+            </label>
+            <label class="ai-knob-item">Archive Mix Factor
+                <input type="number" id="aiArchiveMixFactor" min="0" max="1" step="0.05" value="0.25">
+            </label>
+            <label class="ai-knob-item">Matchup Randomization
+                <input type="number" id="aiMatchupRandomizeChance" min="0" max="1" step="0.05" value="0.80">
+            </label>
+            <label class="ai-knob-item">Stage Randomization
+                <input type="number" id="aiStageRandomizeChance" min="0" max="1" step="0.05" value="0.35">
+            </label>
+        </div>
 
-    <!-- Controls button -->
-    <button id="controlsBtn" class="gallery-btn" style="margin-top:-4px; margin-bottom:8px">CONTROLS</button>
+        <div class="ai-telemetry-grid">
+            <div class="ai-telemetry-card">
+                <h3>AI #1 (P1)</h3>
+                <div id="aiP1Learning" class="ai-telemetry-line">Learning: waiting...</div>
+                <div id="aiP1Saving" class="ai-telemetry-line">Saving: waiting...</div>
+            </div>
+            <div class="ai-telemetry-card">
+                <h3>AI #2 (P2)</h3>
+                <div id="aiP2Learning" class="ai-telemetry-line">Learning: waiting...</div>
+                <div id="aiP2Saving" class="ai-telemetry-line">Saving: waiting...</div>
+            </div>
+        </div>
 
-    <!-- Ultimate Gallery button -->
-    <button id="galleryBtn" class="gallery-btn">ULTIMATE GALLERY</button>
+        <div class="ai-merge-status">
+            <div id="aiCombinedLearning" class="ai-telemetry-line">Combined learning: waiting...</div>
+            <div id="aiCombinedSaving" class="ai-telemetry-line">Combined saving: waiting...</div>
+        </div>
+    </div>
 
-    <!-- Tier List button -->
-    <button id="tierListBtn" class="gallery-btn" style="margin-top:8px">TIER LIST</button>
+    <div class="menu-actions-primary">
+        <!-- Original game launcher -->
+        <button id="startBtn" class="start-btn">FIGHT!</button>
+
+        <!-- Separate dual self-play training launcher -->
+        <button id="selfPlayBtn" class="start-btn">DOUBLE AI TRAINING</button>
+    </div>
+
+    <div class="menu-actions-secondary">
+        <!-- Multiplayer button -->
+        <button id="multiplayerBtn" class="gallery-btn">MULTIPLAYER</button>
+
+        <!-- Controls button -->
+        <button id="controlsBtn" class="gallery-btn">CONTROLS</button>
+
+        <!-- Ultimate Gallery button -->
+        <button id="galleryBtn" class="gallery-btn">ULTIMATE GALLERY</button>
+
+        <!-- Tier List button -->
+        <button id="tierListBtn" class="gallery-btn">TIER LIST</button>
+    </div>
 
     <!-- Controls reference -->
     <div id="controlsPanel" class="controls-help hidden">
@@ -140,6 +203,8 @@
         <p>Ultimate replaces Special when meter is full</p>
         <p><em>Controllers auto-detected: Switch Pro, PS4, PS5, Xbox</em></p>
         <p><em>Press CONTROLS again to hide.</em></p>
+    </div>
+
     </div>
 </div>
 
@@ -187,6 +252,7 @@
 
 <!-- 7. Game + Entry -->
 <script src="js/Game.js"></script>
+<script src="js/QLearningTrainer.js"></script>
 <script src="js/main.js"></script>
 
 </body>
