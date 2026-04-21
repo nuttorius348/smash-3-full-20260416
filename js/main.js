@@ -29,11 +29,13 @@
 const canvas        = document.getElementById('gameCanvas');
 const menuDiv       = document.getElementById('menu');
 const startBtn      = document.getElementById('startBtn');
+const selfPlayBtn   = document.getElementById('selfPlayBtn');
 const galleryBtn    = document.getElementById('galleryBtn');
 const tierListBtn   = document.getElementById('tierListBtn');
 const multiplayerBtn = document.getElementById('multiplayerBtn');
 const controlsBtn   = document.getElementById('controlsBtn');
 const controlsPanel = document.getElementById('controlsPanel');
+const menuContent   = document.getElementById('menuContent');
 
 // ── Device manager for controller auto-detection ────────────────
 const deviceMgr = new SMASH.DeviceManager();
@@ -60,6 +62,22 @@ function applyGlobalSoundSetting(enabled) {
     if (SMASH.Music && SMASH.Music.setEnabled) SMASH.Music.setEnabled(enabled !== false);
 }
 
+function fitMenuToViewport() {
+    if (!menuDiv || !menuContent) return;
+    if (menuDiv.style.display === 'none') return;
+
+    menuContent.style.transform = 'scale(1)';
+
+    const menuStyles = window.getComputedStyle(menuDiv);
+    const padTop = parseFloat(menuStyles.paddingTop) || 0;
+    const padBottom = parseFloat(menuStyles.paddingBottom) || 0;
+    const availableHeight = Math.max(240, window.innerHeight - padTop - padBottom - 4);
+
+    const naturalHeight = menuContent.scrollHeight || menuContent.offsetHeight || 1;
+    const scale = Math.min(1, availableHeight / naturalHeight);
+    menuContent.style.transform = `scale(${scale.toFixed(4)})`;
+}
+
 // ═════════════════════════════════════════════════════════════════
 //  SCENE TRANSITIONS
 // ═════════════════════════════════════════════════════════════════
@@ -78,6 +96,7 @@ function showMenu() {
     menuDiv.style.display = 'flex';
     if (controlsPanel) controlsPanel.classList.add('hidden');
     if (controlsBtn) controlsBtn.classList.remove('active');
+    requestAnimationFrame(fitMenuToViewport);
     startScan();
     const soundsToggle = document.getElementById('soundsToggle');
     if (soundsToggle) applyGlobalSoundSetting(!!soundsToggle.checked);
@@ -132,6 +151,56 @@ function startGame(configs, settings) {
         gameMode:   settings.gameMode   || 'stock',
         staminaHP:  settings.staminaHP  || 150,
         ultimateVideos: settings.ultimateVideos !== false,
+        onExit:     handleGameExit,
+    });
+
+    game.start();
+    activeScene = game;
+}
+
+/**
+ * Launch direct dual-agent self-play training.
+ * Both P1 and P2 are AI slots and are later replaced by Q-learning controllers.
+ * @param {object} settings
+ */
+function startDualSelfPlayTraining(settings) {
+    stopActiveScene();
+    stopScan();
+
+    lastMenuSettings = settings || lastMenuSettings;
+
+    canvas.style.display  = 'block';
+    menuDiv.style.display = 'none';
+    if (document.activeElement) document.activeElement.blur();
+
+    SMASH.Music.play('battle');
+
+    const configs = [
+        {
+            port: 0,
+            character: 'brawler',
+            type: 'ai',
+            level: 6,
+            team: -1,
+        },
+        {
+            port: 1,
+            character: 'brawler',
+            type: 'ai',
+            level: 6,
+            team: -1,
+        },
+    ];
+
+    const game = new SMASH.Game(canvas, configs, {
+        stageKey:   lastMenuSettings.stageKey   || 'battlefield',
+        stocks:     lastMenuSettings.stocks     || 3,
+        debug:      lastMenuSettings.debug      || false,
+        gameMode:   lastMenuSettings.gameMode === 'stamina' ? 'stamina' : 'stock',
+        staminaHP:  lastMenuSettings.staminaHP  || 150,
+        ultimateVideos: lastMenuSettings.ultimateVideos !== false,
+        soundsEnabled: lastMenuSettings.soundsEnabled !== false,
+        qLearningMode: 'dual-self-play',
         onExit:     handleGameExit,
     });
 
@@ -370,10 +439,19 @@ function readMenuSettings() {
 //  EVENT BINDINGS
 // ═════════════════════════════════════════════════════════════════
 
-// FIGHT button → mode-dependent scene
-startBtn.addEventListener('click', () => {
-    launchGameMode(readMenuSettings());
-});
+// FIGHT button → original mode-dependent game launch
+if (startBtn) {
+    startBtn.addEventListener('click', () => {
+        launchGameMode(readMenuSettings());
+    });
+}
+
+// DOUBLE AI TRAINING button → dual self-play training launch
+if (selfPlayBtn) {
+    selfPlayBtn.addEventListener('click', () => {
+        startDualSelfPlayTraining(readMenuSettings());
+    });
+}
 
 // GALLERY button → ultimate gallery
 galleryBtn.addEventListener('click', () => {
@@ -396,26 +474,27 @@ if (controlsBtn && controlsPanel) {
         const isHidden = controlsPanel.classList.contains('hidden');
         controlsPanel.classList.toggle('hidden', !isHidden);
         controlsBtn.classList.toggle('active', isHidden);
+        requestAnimationFrame(fitMenuToViewport);
     });
 }
 
-// Enter from menu
-window.addEventListener('keydown', e => {
-    if (menuDiv.style.display !== 'none' &&
-        (e.code === 'Enter' || e.code === 'NumpadEnter')) {
-        launchGameMode(readMenuSettings());
-    }
-});
+// Note: global Enter-to-start is intentionally disabled.
+// Some systems/controllers emit phantom Enter events and could auto-launch matches.
 
 const gameModeSelect = document.getElementById('gameModeSelect');
 const draftModeRow = document.getElementById('draftModeRow');
 if (gameModeSelect && draftModeRow) {
     const syncDraftControls = () => {
         draftModeRow.style.display = gameModeSelect.value === 'draft' ? 'inline-flex' : 'none';
+        requestAnimationFrame(fitMenuToViewport);
     };
     gameModeSelect.addEventListener('change', syncDraftControls);
     syncDraftControls();
 }
+
+window.addEventListener('resize', () => {
+    requestAnimationFrame(fitMenuToViewport);
+});
 
 // Controller connect/disconnect
 window.addEventListener('gamepadconnected',    () => deviceMgr.scan());
@@ -424,6 +503,7 @@ window.addEventListener('gamepaddisconnected', () => deviceMgr.scan());
 // ── Boot ─────────────────────────────────────────────────────────
 SMASH.Music.play('main');
 startScan();
+requestAnimationFrame(fitMenuToViewport);
 
 // Browsers block autoplay until first user gesture — retry main theme
 document.addEventListener('click', function _firstGesture() {

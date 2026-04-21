@@ -211,6 +211,9 @@ class Game {
             const fighter = new SMASH.Fighter(cfg.port, data, sp[0], sp[1]);
             fighter.stocks = stocks;
 
+            const firstOpponentCfg = configs.find(c => c.port !== cfg.port) || null;
+            const fallbackEnemyPort = firstOpponentCfg ? firstOpponentCfg.port : null;
+
             let ctrl;
             if (cfg._netController) {
                 // Multiplayer: use the pre-built NetworkController
@@ -225,6 +228,16 @@ class Game {
                     case 'gamepad':   ctrl = new SMASH.GamepadController(cfg.padIndex || cfg.port); break;
                     case 'ai':        ctrl = new SMASH.AIController(cfg.port, cfg.level || 5); break;
                     case 'ollama_ai': ctrl = new SMASH.OllamaAIController(cfg.port, cfg.level || 5); break;
+                    case 'learned_ai':
+                        if (typeof SMASH.createLearnedAIController === 'function') {
+                            ctrl = SMASH.createLearnedAIController(this, cfg.port, fallbackEnemyPort, {
+                                epsilon: 0.05,
+                            });
+                        } else {
+                            console.warn('learned_ai selected but learned controller factory is unavailable; falling back to scripted AI.');
+                            ctrl = new SMASH.AIController(cfg.port, Math.min(12, cfg.level || 10));
+                        }
+                        break;
                     default:          ctrl = new SMASH.KeyboardController('wasd');
                 }
             }
@@ -233,7 +246,7 @@ class Game {
                 port:       cfg.port,
                 fighter:    fighter,
                 controller: ctrl,
-                isAI:       cfg.type === 'ai' || cfg.type === 'ollama_ai',
+                isAI:       cfg.type === 'ai' || cfg.type === 'ollama_ai' || cfg.type === 'learned_ai',
                 characterKey: cfg.character || 'brawler',
             };
             this.players.push(player);
