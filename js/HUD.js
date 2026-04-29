@@ -271,8 +271,14 @@ class HUD {
         ctx.roundRect(mx, my, mw, mh, 3);
         ctx.stroke();
 
-        // ULT READY label
-        if (full) {
+        // ULT label (cooldown countdown or ready)
+        if (f._ultimateCooldown > 0) {
+            const secs = Math.ceil(f._ultimateCooldown);
+            ctx.font      = 'bold 10px Arial';
+            ctx.fillStyle = '#ffcc66';
+            ctx.textAlign = 'left';
+            ctx.fillText(`ULT CD: ${secs}s`, mx, my - 3);
+        } else if (full) {
             ctx.font      = 'bold 10px Arial';
             ctx.fillStyle = '#ffd700';
             ctx.textAlign = 'left';

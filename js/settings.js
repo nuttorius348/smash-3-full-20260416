@@ -41,6 +41,7 @@ SMASH.Settings = {
     ULT_MAX:            100,
     DMG_TO_METER:       0.6,
     ULT_CHARGE_CAP:     200,
+    ULT_COOLDOWN_SECONDS: 60,
 
     // Stocks
     DEFAULT_STOCKS:     3,

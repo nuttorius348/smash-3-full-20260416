@@ -38,6 +38,12 @@
  *  boostVX          number   horizontal velocity applied on startup
  *  boostVY          number   vertical velocity applied on startup
  *
+ *  Optional utility sub-fields:
+ *  chargesUlt       number   how much ultimate meter to gain on use
+ *  healsPercent     number   flat percent to heal (damagePercent reduction)
+ *  invincibleFrames number   invincibility frames granted on startup
+ *  screenShake      {timer, strength} to trigger camera shake on hit
+ *
  * ═══════════════════════════════════════════════════════════════
  *  ULTIMATE:
  *    cutsceneVideo    path to mp4 placeholder
@@ -2896,6 +2902,258 @@ ROSTER.sahur = {
         spawnsProjectile: false,
     },
 };
+
+// ═════════════════════════════════════════════════════════════════
+//  14. ALFGAR   (durable brawler with evasive specials)
+// ═════════════════════════════════════════════════════════════════
+ROSTER.alfgar = {
+    name:            'Alfgar Yolanda',
+    color:           '#14b8a6',
+    description:     'Tough brawler who dodges pressure and belly-flops for massive area damage',
+    idleSprite:      'assets/alfgar (2).png',
+    weight:          100,
+    width:           50,
+    height:          80,
+    walkSpeed:       250,
+    runSpeed:        450,
+    airSpeed:        300,
+    jumpForce:       650,
+    shortHopForce:   420,
+    doubleJumpForce: 580,
+    maxJumps:        2,
+    fallSpeed:       600,
+    fastFallSpeed:   900,
+
+    attacks: {
+        // ── Ground Normals ───────────────────────────────────────
+        neutral_attack: {
+            name: 'Jab',
+            sprite: 'sprites/brawler/idle_attack.png',
+            hitboxShape: 'rect',
+            hitboxX: 35, hitboxY: -5, hitboxW: 50, hitboxH: 30, hitboxR: 25,
+            damage: 3,  baseKB: 110,  kbScaling: 0.3, angle: 30,
+            startupFrames: 2, activeFrames: 2, endlagFrames: 6,
+            spawnsProjectile: false,
+        },
+        side_attack: {
+            name: 'Side Tilt',
+            sprite: 'sprites/brawler/side_attack.png',
+            hitboxShape: 'rect',
+            hitboxX: 42, hitboxY: -8, hitboxW: 72, hitboxH: 36, hitboxR: 36,
+            damage: 9,  baseKB: 200, kbScaling: 0.8, angle: 40,
+            startupFrames: 5, activeFrames: 3, endlagFrames: 14,
+            spawnsProjectile: false,
+        },
+        up_attack: {
+            name: 'Up Tilt',
+            sprite: 'sprites/brawler/up_attack.png',
+            hitboxShape: 'circle',
+            hitboxX: 0,  hitboxY: -45, hitboxW: 60, hitboxH: 55, hitboxR: 32,
+            damage: 8,  baseKB: 210, kbScaling: 0.9, angle: 82,
+            startupFrames: 4, activeFrames: 4, endlagFrames: 12,
+            spawnsProjectile: false,
+        },
+        down_attack: {
+            name: 'Down Tilt',
+            sprite: 'sprites/brawler/down_attack.png',
+            hitboxShape: 'rect',
+            hitboxX: 35, hitboxY: 12, hitboxW: 66, hitboxH: 22, hitboxR: 22,
+            damage: 7,  baseKB: 165, kbScaling: 0.6, angle: 20,
+            startupFrames: 3, activeFrames: 3, endlagFrames: 10,
+            spawnsProjectile: false,
+        },
+
+        // ── Aerials ──────────────────────────────────────────────
+        neutral_air: {
+            name: 'Nair',
+            sprite: 'sprites/brawler/idle_attack.png',
+            hitboxShape: 'circle',
+            hitboxX: 0,  hitboxY: 0,  hitboxW: 70, hitboxH: 70, hitboxR: 38,
+            damage: 7,  baseKB: 175, kbScaling: 0.5, angle: 45,
+            startupFrames: 3, activeFrames: 4, endlagFrames: 10,
+            spawnsProjectile: false,
+        },
+        forward_air: {
+            name: 'Fair',
+            sprite: 'sprites/brawler/side_attack.png',
+            hitboxShape: 'rect',
+            hitboxX: 46, hitboxY: -4, hitboxW: 56, hitboxH: 38, hitboxR: 28,
+            damage: 10, baseKB: 215, kbScaling: 1.0, angle: 45,
+            startupFrames: 6, activeFrames: 3, endlagFrames: 16,
+            spawnsProjectile: false,
+        },
+        up_air: {
+            name: 'Uair',
+            sprite: 'sprites/brawler/up_attack.png',
+            hitboxShape: 'circle',
+            hitboxX: 0,  hitboxY: -48, hitboxW: 54, hitboxH: 50, hitboxR: 30,
+            damage: 8,  baseKB: 200, kbScaling: 0.9, angle: 86,
+            startupFrames: 4, activeFrames: 3, endlagFrames: 12,
+            spawnsProjectile: false,
+        },
+        down_air: {
+            name: 'Dair (Spike)',
+            sprite: 'sprites/brawler/down_attack.png',
+            hitboxShape: 'circle',
+            hitboxX: 0,  hitboxY: 32, hitboxW: 46, hitboxH: 46, hitboxR: 26,
+            damage: 12, baseKB: 240, kbScaling: 1.2, angle: 270,
+            startupFrames: 8, activeFrames: 3, endlagFrames: 20,
+            spawnsProjectile: false,
+        },
+
+        // ── Specials ─────────────────────────────────────────────
+        neutral_special: {
+            name: 'Munch Munch',
+            sprite: 'sprites/brawler/neutral_special.png',
+            hitboxShape: 'circle',
+            hitboxX: 20, hitboxY: 0, hitboxW: 30, hitboxH: 30, hitboxR: 15,
+            damage: 0, baseKB: 0, kbScaling: 0, angle: 0,
+            startupFrames: 8, activeFrames: 20, endlagFrames: 12,
+            spawnsProjectile: false,
+            chargesUlt: 25,
+            healsPercent: 25,
+        },
+        side_special: {
+            name: 'Dodge',
+            sprite: 'sprites/brawler/side_special.png',
+            hitboxShape: 'circle',
+            hitboxX: 0, hitboxY: 0, hitboxW: 20, hitboxH: 20, hitboxR: 10,
+            damage: 0, baseKB: 0, kbScaling: 0, angle: 0,
+            startupFrames: 2, activeFrames: 10, endlagFrames: 12,
+            spawnsProjectile: false,
+            boostVX: 420,
+            invincibleFrames: 20,
+        },
+        up_special: {
+            name: 'Bounce',
+            sprite: 'sprites/brawler/up_special.png',
+            hitboxShape: 'circle',
+            hitboxX: 0,  hitboxY: -35, hitboxW: 50, hitboxH: 60, hitboxR: 30,
+            damage: 60,  baseKB: 360, kbScaling: 1.3, angle: 270,
+            startupFrames: 5, activeFrames: 6, endlagFrames: 18,
+            spawnsProjectile: false,
+            boostVX: 0, boostVY: -900,
+            squishDurationFrames: 600,
+            squishSpeedMult: 0.6,
+            squishScaleX: 1.25,
+            squishScaleY: 0.7,
+        },
+        down_special: {
+            name: 'Belly Flop',
+            sprite: 'sprites/brawler/down_special.png',
+            hitboxShape: 'circle',
+            hitboxX: 0, hitboxY: 30, hitboxW: 160, hitboxH: 110, hitboxR: 80,
+            damage: 0, baseKB: 360, kbScaling: 1.5, angle: 70,
+            startupFrames: 12, activeFrames: 6, endlagFrames: 30,
+            spawnsProjectile: false,
+            boostVX: 0, boostVY: 900,
+            isArmored: true, armorHits: 2, armorDuringStartup: true,
+            screenShake: { timer: 0.28, strength: 18 },
+            groundSlamDamage: 60,
+            groundSlamCloseDamage: 150,
+            groundSlamCloseRadius: 130,
+            groundSlamBaseKB: 420,
+            groundSlamKbScaling: 1.8,
+            groundSlamAngle: 80,
+        },
+    },
+
+    ultimateAttack: {
+        name: 'Floppy Nuke',
+        sprite: 'sprites/brawler/ultimate.png',
+        cutsceneVideo: 'assets/Alfgar_Ultimate.mp4',
+        hitboxShape: 'circle',
+        hitboxX: 0, hitboxY: 0, hitboxW: 340, hitboxH: 230, hitboxR: 180,
+        damage: 85, baseKB: 580, kbScaling: 1.9, angle: 60,
+        startupFrames: 0, activeFrames: 6, endlagFrames: 30,
+        spawnsProjectile: false,
+    },
+};
+
+// ═════════════════════════════════════════════════════════════════
+//  Omni Man
+// ═════════════════════════════════════════════════════════════════
+const omniAttacks = Object.assign({}, ROSTER.brawler.attacks);
+
+omniAttacks.down_special = {
+    name: 'Squatt',
+    sprite: 'assets/Omni Man_Sprite Down.jfif',
+    hitboxShape: 'rect',
+    hitboxX: 40, hitboxY: 8, hitboxW: 90, hitboxH: 40, hitboxR: 20,
+    damage: 70, baseKB: 520, kbScaling: 1.6, angle: 70,
+    startupFrames: 10, activeFrames: 4, endlagFrames: 26,
+    spawnsProjectile: false,
+    tempSprite: 'assets/Omni Man_Sprite Down.jfif',
+    tempSpriteDuration: 2.0,
+    soundEffect: 'assets/Omni Man_Down Soundeffect.mp3',
+    suppressDefaultSpecialSfx: true,
+};
+
+omniAttacks.up_special = {
+    name: 'Are You Sure',
+    sprite: 'assets/Omni Man_Sprite Up.png',
+    hitboxShape: 'rect',
+    hitboxX: 0, hitboxY: -30, hitboxW: 40, hitboxH: 50, hitboxR: 20,
+    damage: 0, baseKB: 0, kbScaling: 0, angle: 0,
+    startupFrames: 4, activeFrames: 8, endlagFrames: 18,
+    spawnsProjectile: false,
+    boostVX: 0, boostVY: -1000,
+    invincibleFrames: 24,
+    tempSprite: 'assets/Omni Man_Sprite Up.png',
+    tempSpriteDuration: 2.0,
+    soundEffect: 'assets/Omni Man_Up Soundeffect.mp3',
+    suppressDefaultSpecialSfx: true,
+};
+
+omniAttacks.side_special = {
+    name: 'Please',
+    sprite: 'assets/Omni Man_Sprite Side.gif',
+    hitboxShape: 'rect',
+    hitboxX: 45, hitboxY: -6, hitboxW: 100, hitboxH: 45, hitboxR: 22,
+    damage: 85, baseKB: 600, kbScaling: 1.8, angle: 38,
+    startupFrames: 12, activeFrames: 3, endlagFrames: 28,
+    spawnsProjectile: false,
+    tempSprite: 'assets/Omni Man_Sprite Side.gif',
+    tempSpriteDuration: 2.0,
+    soundEffect: 'assets/Omni Man_Side Soundeffect.mp3',
+    suppressDefaultSpecialSfx: true,
+    delayHitUntilSpriteEnd: true,
+};
+
+omniAttacks.neutral_special = {
+    name: 'Omning It',
+    sprite: 'assets/Omni Man_Sprite Neutral.gif',
+    hitboxShape: 'circle',
+    hitboxX: 0, hitboxY: 0, hitboxW: 20, hitboxH: 20, hitboxR: 10,
+    damage: 0, baseKB: 0, kbScaling: 0, angle: 0,
+    startupFrames: 8, activeFrames: 18, endlagFrames: 14,
+    spawnsProjectile: false,
+    chargesUlt: 25,
+    healsPercent: 10,
+    tempSprite: 'assets/Omni Man_Sprite Neutral.gif',
+    tempSpriteDuration: 2.0,
+    soundEffect: 'assets/Omni Man_Neutral Soundeffect.mp3',
+    suppressDefaultSpecialSfx: true,
+};
+
+ROSTER.omni_man = Object.assign({}, ROSTER.brawler, {
+    name:            'Omni Man',
+    color:           '#b91c1c',
+    description:     'A ruthless powerhouse who turns specials into massive burst damage.',
+    idleSprite:      'assets/Sprite_Omni Man.png',
+    attacks:         omniAttacks,
+    ultimateAttack: {
+        name: 'Mega Squat',
+        sprite: 'assets/Sprite_Omni Man.png',
+        cutsceneVideo: 'assets/Omni Man_Ultimate.mp4',
+        hitboxShape: 'rect',
+        hitboxX: 0, hitboxY: 0, hitboxW: 340, hitboxH: 220, hitboxR: 110,
+        damage: 120, baseKB: 2000, kbScaling: 2.2, angle: 60,
+        startupFrames: 0, activeFrames: 6, endlagFrames: 30,
+        spawnsProjectile: false,
+        instantKO: true,
+    },
+});
 
 
 // ─────────────────────────────────────────────────────────────────

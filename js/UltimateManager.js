@@ -461,14 +461,17 @@ class UltimateManager {
             // Apply damage
             target.damagePercent += dmg;
 
-            // Compute knockback using the standard formula
-            const kb = SMASH.Fighter.calcKB(
-                dmg,
-                target.damagePercent,
-                target.data.weight,
-                ult.baseKB,
-                ult.kbScaling
-            );
+            // Compute knockback (instant KO flag or 150% threshold)
+            const forceInstantKO = !!ult.instantKO;
+            const kb = (forceInstantKO || target.damagePercent >= S.ULT_KO_THRESHOLD)
+                ? S.INSTANT_KO_KB
+                : SMASH.Fighter.calcKB(
+                    dmg,
+                    target.damagePercent,
+                    target.data.weight,
+                    ult.baseKB,
+                    ult.kbScaling
+                );
 
             // Launch angle (use ultimate's angle, flip based on attacker facing)
             const angleDeg = ult.angle * (this._attacker.facing >= 0 ? 1 : 1);

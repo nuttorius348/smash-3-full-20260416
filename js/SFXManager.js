@@ -48,6 +48,7 @@ const EVENT_SOUNDS = {
 
 const CHARACTER_SELECT_SOUNDS = {
     aru:       'assets/Aru_selected (mp3cut.net).mp3',
+    alfgar:    'assets/AlfgarYolanda_selected.mp3',
     bomber:    'assets/Bomber_selected (mp3cut.net).mp3',
     diddy:     'assets/Diddy_selected (mp3cut.net).mp3',
     droid:     'assets/Droid_selected (mp3cut.net).mp3',
@@ -65,6 +66,7 @@ const CHARACTER_SELECT_SOUNDS = {
     trump:     'assets/Trump_selected (mp3cut.net).mp3',
     vaughan:   'assets/Vaughan_selected.mp3',
     sahur:     'assets/Sahur_selected.mp3',
+    omni_man:  'assets/Omni Man_Selected.mp3',
 };
 
 const HIT_VOLUME  = 0.45;

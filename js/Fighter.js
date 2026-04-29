@@ -27,6 +27,76 @@ const ST = {
     DEAD:       'dead',
 };
 
+class GifSprite {
+    constructor(src, onReady) {
+        this.src = src;
+        this.onReady = onReady;
+        this.ready = false;
+        this.frames = [];
+        this.frameIndex = 0;
+        this.accMs = 0;
+        this.totalDurationMs = 0;
+        this.canvas = document.createElement('canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this._load();
+    }
+
+    async _load() {
+        if (!window.gifuct || !window.gifuct.parseGIF || !window.gifuct.decompressFrames) {
+            console.warn('gifuct-js not available; cannot animate GIF:', this.src);
+            return;
+        }
+        try {
+            const res = await fetch(this.src);
+            const buf = await res.arrayBuffer();
+            const gif = window.gifuct.parseGIF(buf);
+            const frames = window.gifuct.decompressFrames(gif, true);
+            if (!frames || frames.length === 0) return;
+
+            const w = gif.lsd && gif.lsd.width ? gif.lsd.width : frames[0].dims.width;
+            const h = gif.lsd && gif.lsd.height ? gif.lsd.height : frames[0].dims.height;
+            this.canvas.width = w;
+            this.canvas.height = h;
+            this.frames = frames;
+            this.totalDurationMs = frames.reduce((sum, frame) => {
+                return sum + this._frameDurationMs(frame);
+            }, 0);
+            this._renderFrame(0);
+            this.ready = true;
+            if (this.onReady) this.onReady();
+        } catch (err) {
+            console.warn('Failed to load GIF sprite:', this.src, err);
+        }
+    }
+
+    _frameDurationMs(frame) {
+        const delay = frame && frame.delay ? frame.delay : 100;
+        return Math.max(20, delay);
+    }
+
+    _renderFrame(index) {
+        const frame = this.frames[index];
+        if (!frame) return;
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        const imgData = new ImageData(frame.patch, frame.dims.width, frame.dims.height);
+        this.ctx.putImageData(imgData, frame.dims.left, frame.dims.top);
+    }
+
+    update(dt) {
+        if (!this.ready || this.frames.length <= 1) return;
+        this.accMs += dt * 1000;
+        let cur = this.frames[this.frameIndex];
+        let curDur = this._frameDurationMs(cur);
+        while (this.accMs >= curDur) {
+            this.accMs -= curDur;
+            this.frameIndex = (this.frameIndex + 1) % this.frames.length;
+            this._renderFrame(this.frameIndex);
+            cur = this.frames[this.frameIndex];
+            curDur = this._frameDurationMs(cur);
+        }
+    }
+}
+
 const LOCKED = new Set([
     ST.ATTACK, ST.SPECIAL, ST.HITSTUN, ST.HELPLESS,
     ST.ULTIMATE, ST.JUMPSQUAT, ST.SHIELD_STUN, ST.FOCUS, ST.LEDGE_HANG,
@@ -54,6 +124,7 @@ class Fighter {
         // Combat
         this.damagePercent  = 0;
         this.ultimateMeter  = 0;
+        this._ultimateCooldown = 0;
         this.stocks         = S.DEFAULT_STOCKS;
         this.invincible     = false;
         this._invFrames     = 0;
@@ -114,6 +185,17 @@ class Fighter {
         // Slippery debuff
         this.slipperyTimer = 0;      // frames remaining of slippery effect
 
+        // Squish debuff (slow + sprite squash)
+        this._squishTimer = 0;
+        this._squishSpeedMult = 1.0;
+        this._squishScaleX = 1.0;
+        this._squishScaleY = 1.0;
+
+        // Alfgar belly-flop state
+        this._alfgarBellyFlopRotate = false;
+        this._alfgarBellyFlopSlam = false;
+        this._landedPlatform = null;
+
         // Damage multiplier (for Fazbear's stacking ultimate)
         this.damageMultiplier = 1.0;
         this.boostedHitsLeft = 0;  // hits remaining before multiplier resets
@@ -128,6 +210,10 @@ class Fighter {
         this._sahurChargeRatio = 0;
         this._sahurFullChargeFlash = 0;
         this._sahurFullChargeTriggered = false;
+        this._pendingTempSpriteOnHit = null;
+        this._delayHitAudio = null;
+        this._delayHitReady = false;
+        this._delayHitSpriteTimer = 0;
         this._sahurChargeLoopAudio = null;
         this._sahurSideReleaseAudio = null;
         if (this.data.key === 'sahur') {
@@ -149,6 +235,16 @@ class Fighter {
 
         // Last-hit metadata for KO SFX routing
         this._lastHitWasSpecial = false;
+
+        // Temporary sprite override (e.g., special hit visuals)
+        this._tempSpriteTimer = 0;
+        this._tempSpriteRestore = null;
+        this._pendingTempSpriteOnHit = null;
+        this._gifSprite = null;
+        this._gifDomImage = null;
+        this._delayHitAudio = null;
+        this._delayHitReady = false;
+        this._delayHitSpriteTimer = 0;
     }
 
     _canPlaySfx() {
@@ -173,8 +269,30 @@ class Fighter {
             this.invincible = this._invFrames > 0;
         }
 
+        if (this._gifSprite) this._gifSprite.update(dt);
+
+        // Temporary sprite override countdown (seconds)
+        if (this._tempSpriteTimer > 0) {
+            this._tempSpriteTimer = Math.max(0, this._tempSpriteTimer - dt);
+            if (this._tempSpriteTimer === 0) this._restoreTempSprite();
+        }
+
+        // Ultimate cooldown countdown (seconds)
+        if (this._ultimateCooldown > 0) {
+            this._ultimateCooldown = Math.max(0, this._ultimateCooldown - dt);
+        }
+
         // Slippery countdown
         if (this.slipperyTimer > 0) this.slipperyTimer--;
+
+        if (this._squishTimer > 0) {
+            this._squishTimer--;
+            if (this._squishTimer <= 0) {
+                this._squishSpeedMult = 1.0;
+                this._squishScaleX = 1.0;
+                this._squishScaleY = 1.0;
+            }
+        }
 
         if (this._sahurFullChargeFlash > 0) {
             this._sahurFullChargeFlash = Math.max(0, this._sahurFullChargeFlash - 1);
@@ -194,11 +312,11 @@ class Fighter {
             case ST.HITSTUN:     this._tickHistun(); break;
             case ST.ATTACK:
             case ST.SPECIAL:
-            case ST.ULTIMATE:    this._tickAttack(inp); break;
+            case ST.ULTIMATE:    this._tickAttack(inp, dt); break;
             case ST.JUMPSQUAT:   this._tickJumpsquat(); break;
             case ST.HELPLESS:    this._tickHelpless(inp); break;
             case ST.SHIELD_STUN: this._tickShieldStun(); break;
-            case ST.FOCUS:       this._tickFocus(); break;
+            case ST.FOCUS:       this._tickFocus(inp, dt); break;
             case ST.LEDGE_HANG:  this._tickLedgeHang(inp); break;
             case ST.GRABBING:    this._tickGrabbing(inp); break;
             case ST.GRABBED:     this._tickGrabbed(); break;
@@ -213,6 +331,7 @@ class Fighter {
     _tickActionable(inp, dt) {
         let event = null;
         const mx = inp.moveX;
+        const speedMult = this._squishSpeedMult || 1.0;
 
         // ── Shield ───────────────────────────────────────────────
         if (inp.shield && this.grounded && this.shieldHP > 0) {
@@ -262,7 +381,7 @@ class Fighter {
 
         // ── Special / Ultimate ───────────────────────────────────
         if (inp.special) {
-            if (this.ultimateMeter >= S.ULT_MAX) {
+            if (this.ultimateMeter >= S.ULT_MAX && this._ultimateCooldown <= 0) {
                 return this._startUltimate();
             }
             const dir = this._attackDir(inp);
@@ -290,7 +409,7 @@ class Fighter {
         if (this.grounded) {
             if (Math.abs(mx) > 0.1) {
                 this.facing = mx > 0 ? 1 : -1;
-                const spd = Math.abs(mx) < 0.7 ? this.data.walkSpeed : this.data.runSpeed;
+                const spd = (Math.abs(mx) < 0.7 ? this.data.walkSpeed : this.data.runSpeed) * speedMult;
                 this.vx = mx * spd;
                 this.state = Math.abs(mx) < 0.7 ? ST.WALK : ST.RUN;
             } else {
@@ -302,7 +421,7 @@ class Fighter {
             if (Math.abs(mx) > 0.1) {
                 this.facing = mx > 0 ? 1 : -1;
                 // Direct air control with smooth transition
-                const targetVx = mx * this.data.airSpeed;
+                const targetVx = mx * this.data.airSpeed * speedMult;
                 this.vx = this.vx * 0.85 + targetVx * 0.15;
             }
             
@@ -367,6 +486,31 @@ class Fighter {
         this.activeHitbox = null;
         this._projSpawned = false;
 
+        let sfxAudio = null;
+
+        if (atk.tempSprite) {
+            if (atk.tempSpriteOnHit) {
+                this._pendingTempSpriteOnHit = {
+                    src: atk.tempSprite,
+                    duration: atk.tempSpriteDuration || 0,
+                    audio: null,
+                };
+            } else {
+                this._applyTempSprite(atk.tempSprite, atk.tempSpriteDuration || 0, null);
+            }
+        }
+
+        if (atk.delayHitUntilSpriteEnd) {
+            const fallbackMs = Math.max(0, (atk.tempSpriteDuration || 0) * 1000);
+            this._delayHitSpriteTimer = fallbackMs;
+        } else {
+            this._delayHitSpriteTimer = 0;
+        }
+
+        if (this.data.key === 'alfgar' && key === 'down_special') {
+            this._alfgarBellyFlopRotate = true;
+        }
+
         // Focus / super-armor setup
         if (atk.isArmored && atk.armorDuringStartup) {
             this.state = ST.FOCUS;
@@ -374,6 +518,11 @@ class Fighter {
             this._focusDamageStored = 0;
         } else {
             this.state = isSpecial ? ST.SPECIAL : ST.ATTACK;
+        }
+
+        if (atk.invincibleFrames) {
+            this._invFrames = Math.max(this._invFrames, atk.invincibleFrames);
+            this.invincible = this._invFrames > 0;
         }
 
         // Up-B velocity boost (skip Sahur chargeable side-special lunge until release)
@@ -389,11 +538,33 @@ class Fighter {
         // Sound effect (e.g. Netanyahu side-special)
         if (atk.soundEffect) {
             if (this._canPlaySfx()) {
-                try { new Audio(atk.soundEffect).play(); } catch(_) {}
+                try {
+                    sfxAudio = new Audio(atk.soundEffect);
+                    sfxAudio.play();
+                } catch(_) {}
             }
         }
 
-        if (isSpecial && SMASH.SFX) {
+        if (atk.delayHitUntilAudioEnd && sfxAudio) {
+            this._delayHitAudio = sfxAudio;
+            this._delayHitReady = false;
+            sfxAudio.addEventListener('ended', () => {
+                this._delayHitReady = true;
+            }, { once: true });
+        } else {
+            this._delayHitAudio = null;
+            this._delayHitReady = false;
+        }
+
+        if (atk.tempSprite) {
+            if (atk.tempSpriteOnHit) {
+                if (this._pendingTempSpriteOnHit) this._pendingTempSpriteOnHit.audio = sfxAudio;
+            } else {
+                this._applyTempSprite(atk.tempSprite, atk.tempSpriteDuration || 0, sfxAudio);
+            }
+        }
+
+        if (isSpecial && SMASH.SFX && !atk.suppressDefaultSpecialSfx) {
             if (key === 'down_special') SMASH.SFX.playDownSpecial();
             if (key === 'up_special') SMASH.SFX.playUpSpecial();
             if (this.data.key === 'trump' && key === 'neutral_special') {
@@ -406,6 +577,7 @@ class Fighter {
 
     _startUltimate() {
         this.ultimateMeter = 0;
+        this._ultimateCooldown = S.ULT_COOLDOWN_SECONDS;
         const ult = this.data.ultimateAttack;
         if (ult) {
             this.currentAttack = ult;
@@ -423,6 +595,89 @@ class Fighter {
         try { audio.preservesPitch = false; } catch(_) {}
         try { audio.mozPreservesPitch = false; } catch(_) {}
         try { audio.webkitPreservesPitch = false; } catch(_) {}
+    }
+
+    _applyTempSprite(src, duration, audio) {
+        if (!src) return;
+        const useAudio = !!audio;
+        if (!useAudio && duration <= 0) return;
+        if (!this._tempSpriteRestore) {
+            this._tempSpriteRestore = {
+                idleSprite: this.data.idleSprite,
+                spriteImage: this.data.spriteImage,
+                spriteLoaded: this.data.spriteLoaded,
+            };
+        }
+
+        this.data.idleSprite = src;
+        this.data.spriteLoaded = false;
+
+        const isGif = typeof src === 'string' && src.toLowerCase().endsWith('.gif');
+        if (isGif && window.gifuct) {
+            const gifSprite = new GifSprite(src, () => {
+                this.data.spriteLoaded = true;
+                if (this._delayHitSpriteTimer > 0 && gifSprite.totalDurationMs > 0) {
+                    this._delayHitSpriteTimer = Math.max(this._delayHitSpriteTimer, gifSprite.totalDurationMs);
+                }
+            });
+            this._gifSprite = gifSprite;
+            this._gifDomImage = null;
+            this.data.spriteImage = gifSprite.canvas;
+        } else if (isGif) {
+            const img = document.createElement('img');
+            img.style.position = 'absolute';
+            img.style.left = '-10000px';
+            img.style.top = '-10000px';
+            img.style.width = '1px';
+            img.style.height = '1px';
+            img.style.opacity = '0';
+            img.style.pointerEvents = 'none';
+            document.body.appendChild(img);
+            this._gifSprite = null;
+            this._gifDomImage = img;
+            this.data.spriteImage = img;
+            this.data.spriteImage.onload = () => { this.data.spriteLoaded = true; };
+            this.data.spriteImage.onerror = () => {
+                console.warn(`Failed to load sprite: ${src}`);
+                this.data.spriteLoaded = false;
+            };
+            this.data.spriteImage.src = this.data.idleSprite;
+        } else {
+            this._gifSprite = null;
+            this._gifDomImage = null;
+            this.data.spriteImage = new Image();
+            this.data.spriteImage.onload = () => { this.data.spriteLoaded = true; };
+            this.data.spriteImage.onerror = () => {
+                console.warn(`Failed to load sprite: ${src}`);
+                this.data.spriteLoaded = false;
+            };
+            this.data.spriteImage.src = this.data.idleSprite;
+        }
+        this._tempSpriteTimer = duration;
+
+        if (useAudio) {
+            const audioDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
+            if (audioDuration > 0) this._tempSpriteTimer = audioDuration;
+            audio.addEventListener('ended', () => {
+                if (this._tempSpriteTimer > 0) {
+                    this._tempSpriteTimer = 0;
+                    this._restoreTempSprite();
+                }
+            }, { once: true });
+        }
+    }
+
+    _restoreTempSprite() {
+        if (!this._tempSpriteRestore) return;
+        this.data.idleSprite = this._tempSpriteRestore.idleSprite;
+        this.data.spriteImage = this._tempSpriteRestore.spriteImage;
+        this.data.spriteLoaded = this._tempSpriteRestore.spriteLoaded;
+        this._tempSpriteRestore = null;
+        this._gifSprite = null;
+        if (this._gifDomImage && this._gifDomImage.parentNode) {
+            this._gifDomImage.parentNode.removeChild(this._gifDomImage);
+        }
+        this._gifDomImage = null;
     }
 
     _startSahurChargeLoopAudio() {
@@ -462,7 +717,8 @@ class Fighter {
         if (p && p.catch) p.catch(() => {});
     }
 
-    _tickAttack(inp) {
+    _tickAttack(inp, dt) {
+        const tickDt = typeof dt === 'number' ? dt : 0;
         const isSahurSideCharge =
             this.data.key === 'sahur' &&
             this.state === ST.SPECIAL &&
@@ -505,7 +761,21 @@ class Fighter {
             }
         } else {
             this._stopSahurChargeLoopAudio();
-            this._atkTimer--;
+            if (this._atkPhase === 'startup') {
+                if (this._delayHitSpriteTimer > 0) {
+                    this._delayHitSpriteTimer = Math.max(0, this._delayHitSpriteTimer - tickDt * 1000);
+                    if (this._delayHitSpriteTimer === 0) this._atkTimer = 0;
+                } else if (this._delayHitAudio) {
+                    if (this._delayHitReady) {
+                        this._delayHitAudio = null;
+                        this._atkTimer = 0;
+                    }
+                } else {
+                    this._atkTimer--;
+                }
+            } else {
+                this._atkTimer--;
+            }
         }
 
         if (this._atkPhase === 'startup') {
@@ -553,6 +823,11 @@ class Fighter {
                     }
                 }
 
+                if (this.currentAttack.healsPercent) {
+                    this.damagePercent = Math.max(0,
+                        this.damagePercent - this.currentAttack.healsPercent);
+                }
+
                 // Transition focus → attack state for active phase
                 if (this.state === ST.FOCUS) {
                     this._armorHitsLeft = 0;
@@ -574,8 +849,8 @@ class Fighter {
     }
 
     // Focus state = startup with super armor
-    _tickFocus() {
-        this._tickAttack();
+    _tickFocus(inp, dt) {
+        this._tickAttack(inp, dt);
     }
 
     _endAttack() {
@@ -1084,12 +1359,23 @@ class Fighter {
         this.grabTarget = null;
         this.grabHitsDealt = 0;
         this.grabTimer = 0;
+        this.slipperyTimer = 0;
+        this._squishTimer = 0;
+        this._squishSpeedMult = 1.0;
+        this._squishScaleX = 1.0;
+        this._squishScaleY = 1.0;
+        this._alfgarBellyFlopRotate = false;
+        this._alfgarBellyFlopSlam = false;
+        this._landedPlatform = null;
         this._lastHitWasSpecial = false;
         this._stopSahurChargeLoopAudio();
         this._sahurChargeFrames = 0;
         this._sahurChargeRatio = 0;
         this._sahurFullChargeFlash = 0;
         this._sahurFullChargeTriggered = false;
+        this._tempSpriteTimer = 0;
+        this._pendingTempSpriteOnHit = null;
+        this._restoreTempSprite();
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -1112,23 +1398,41 @@ class Fighter {
 
         ctx.save();
 
+        const rotation = this._alfgarBellyFlopRotate ? -Math.PI / 2 : 0;
+        const scaleX = this._squishScaleX || 1.0;
+        const scaleY = this._squishScaleY || 1.0;
+
         // ── Draw sprite or colored rectangle ─────────────────────
         if (this.data.spriteLoaded && this.data.spriteImage) {
             // Draw actual sprite image
             ctx.save();
-            if (this.facing === -1) {
-                // Flip horizontally for left-facing
-                ctx.translate(sx + sw, sy);
-                ctx.scale(-1, 1);
-                ctx.drawImage(this.data.spriteImage, 0, 0, sw, sh);
+            if (rotation !== 0 || scaleX !== 1.0 || scaleY !== 1.0 || this.facing === -1) {
+                const cx = sx + sw / 2;
+                const cy = sy + sh / 2;
+                ctx.translate(cx, cy);
+                if (rotation !== 0) ctx.rotate(rotation);
+                const flip = this.facing === -1 ? -1 : 1;
+                ctx.scale(flip * scaleX, scaleY);
+                ctx.drawImage(this.data.spriteImage, -sw / 2, -sh / 2, sw, sh);
             } else {
                 ctx.drawImage(this.data.spriteImage, sx, sy, sw, sh);
             }
             ctx.restore();
         } else {
             // Fallback: colored rectangle
+            ctx.save();
             ctx.fillStyle = color;
-            ctx.fillRect(sx, sy, sw, sh);
+            if (rotation !== 0 || scaleX !== 1.0 || scaleY !== 1.0) {
+                const cx = sx + sw / 2;
+                const cy = sy + sh / 2;
+                ctx.translate(cx, cy);
+                if (rotation !== 0) ctx.rotate(rotation);
+                ctx.scale(scaleX, scaleY);
+                ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
+            } else {
+                ctx.fillRect(sx, sy, sw, sh);
+            }
+            ctx.restore();
 
             // Face direction indicator (eye)
             const eyeX = sx + sw / 2 + (this.facing * sw * 0.18);

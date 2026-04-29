@@ -82,6 +82,7 @@ class Fighter:
         # Combat state
         self.damage_percent: float = 0.0
         self.ultimate_meter: float = 0.0
+        self.ultimate_cooldown: float = 0.0
         self.stocks: int = DEFAULT_STOCKS
         self.invincible: bool = False
         self._invincible_frames: int = 0
@@ -202,6 +203,10 @@ class Fighter:
             self._invincible_frames -= 1
             self.invincible = self._invincible_frames > 0
 
+        # Tick ultimate cooldown (seconds)
+        if self.ultimate_cooldown > 0:
+            self.ultimate_cooldown = max(0.0, self.ultimate_cooldown - dt)
+
         # Dead fighters don't update
         if self.state == FighterState.DEAD:
             return None
@@ -280,7 +285,7 @@ class Fighter:
 
         # --- Special (or Ultimate) ---
         if inp.special:
-            if self.ultimate_meter >= ULTIMATE_METER_MAX:
+            if self.ultimate_meter >= ULTIMATE_METER_MAX and self.ultimate_cooldown <= 0:
                 # Signal ultimate attempt (target detection handled by Game/UltimateManager)
                 return {"type": "ultimate_attempt", "port": self.port}
             direction = self._get_attack_direction(inp)

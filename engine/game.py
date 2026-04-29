@@ -9,7 +9,7 @@ import pygame
 
 from settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT, FPS, GAME_TITLE, COLOR_BG,
-    DEBUG_HITBOXES,
+    DEBUG_HITBOXES, ULTIMATE_COOLDOWN_SECONDS,
 )
 from engine.physics import PhysicsEngine
 from engine.camera import Camera
@@ -229,6 +229,7 @@ class Game:
                     if activation_result:
                         # Targets detected — start cutscene
                         print(f"[ULTIMATE] Activation successful! Targets detected.")
+                        player.fighter.ultimate_cooldown = ULTIMATE_COOLDOWN_SECONDS
                         self._cutscene_port = activation_result["port"]
                         video = activation_result.get("video", "")
                         print(f"[ULTIMATE] Video path: {video}")

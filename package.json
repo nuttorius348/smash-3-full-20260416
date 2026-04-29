@@ -22,6 +22,10 @@
   },
   "homepage": "https://github.com/nuttorius348/smash-3#readme",
   "dependencies": {
+    "gifuct-js": "^2.1.2",
     "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0"
   }
 }

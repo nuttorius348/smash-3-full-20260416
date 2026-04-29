@@ -5,7 +5,7 @@ from typing import List, Optional, TYPE_CHECKING
 
 import pygame
 
-from settings import ULTIMATE_METER_MAX
+from settings import ULTIMATE_METER_MAX, ULTIMATE_KO_THRESHOLD, INSTANT_KO_KB
 
 if TYPE_CHECKING:
     from entities.fighter import Fighter
@@ -33,7 +33,7 @@ class UltimateManager:
     ULTIMATE_BASE_KB = 400.0
     ULTIMATE_KB_SCALING = 1.5
     ULTIMATE_ANGLE = 60.0
-    GUARANTEED_KO_THRESHOLD = 180.0  # percent at which KO is guaranteed
+    GUARANTEED_KO_THRESHOLD = ULTIMATE_KO_THRESHOLD  # percent at which KO is guaranteed
     
     # Meter refund when no targets detected
     METER_REFUND_PERCENT = 0.5
@@ -224,9 +224,9 @@ class UltimateManager:
             # Check for guaranteed KO
             if target.damage_percent >= self.GUARANTEED_KO_THRESHOLD:
                 # Set damage to instant KO range and force death on next blast zone check
-                target.damage_percent = 300.0
+                target.damage_percent = max(target.damage_percent, 300.0)
                 # Apply massive knockback to ensure blast zone exit
-                kb_magnitude = 2500.0
+                kb_magnitude = INSTANT_KO_KB
             else:
                 # Calculate normal knockback
                 kb_magnitude = PhysicsEngine.calculate_knockback(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from typing import List, TYPE_CHECKING
+import math
 
 import pygame
 
@@ -105,7 +106,11 @@ class HUD:
         pygame.draw.rect(screen, COLOR_WHITE,
                          (meter_x, meter_y, self.METER_WIDTH, self.METER_HEIGHT), 1)
 
-        # "ULT" label when ready
-        if fighter.ultimate_meter >= ULTIMATE_METER_MAX:
+        # "ULT" label when ready or cooldown countdown
+        if fighter.ultimate_cooldown > 0:
+            secs = int(math.ceil(fighter.ultimate_cooldown))
+            ult_label = self.font_small.render(f"ULT CD: {secs}s", True, (255, 200, 100))
+            screen.blit(ult_label, (meter_x, meter_y - 16))
+        elif fighter.ultimate_meter >= ULTIMATE_METER_MAX:
             ult_label = self.font_small.render("ULT READY", True, (255, 215, 0))
             screen.blit(ult_label, (meter_x, meter_y - 16))

@@ -157,6 +157,8 @@ class Game {
             shakeTimer: 0,
             shakeStrength: 0,
         };
+        this._combatShakeTimer = 0;
+        this._combatShakeStrength = 0;
         this._setupBattleIntro();
 
         // ── Timing ────────────────────────────────────────────────
@@ -760,6 +762,11 @@ class Game {
         // 2. Melee combat resolution
         this._resolveCombat();
 
+        if (this._combatShakeTimer > 0) {
+            this._combatShakeTimer = Math.max(0, this._combatShakeTimer - dt);
+            this._combatShakeStrength = Math.max(0, this._combatShakeStrength - dt * 44);
+        }
+
         // 3. Snapshot damage before projectile step (for stat tracking)
         const preDmg = this.fighters.map(f => f.damagePercent);
 
@@ -786,6 +793,70 @@ class Game {
                 this.physics.update(f, this.stage, dt);
                 // Check for ledge grab
                 f.checkLedgeGrab(this.stage);
+            }
+        }
+
+        // 6b. Alfgar belly-flop landing slam
+        for (const f of this.fighters) {
+            if (!f.isAlive || !f._alfgarBellyFlopSlam) continue;
+            f._alfgarBellyFlopSlam = false;
+
+            if (!f.data || !f.data.attacks || !f.data.attacks['down_special']) {
+                continue;
+            }
+
+            const slam = f.data.attacks['down_special'];
+            const platform = f._landedPlatform || null;
+            const ax = f.x + f.width / 2;
+            const ay = f.y + f.height / 2;
+            const closeRadius = slam.groundSlamCloseRadius || 120;
+            const baseDamage = slam.groundSlamDamage || 60;
+            const closeDamage = slam.groundSlamCloseDamage || 150;
+            const baseKB = slam.groundSlamBaseKB || slam.baseKB || 360;
+            const kbScaling = slam.groundSlamKbScaling || slam.kbScaling || 1.5;
+            const angle = slam.groundSlamAngle || 70;
+
+            if (slam.screenShake) {
+                const shake = slam.screenShake;
+                const timer = (shake.timer != null) ? shake.timer : 0.22;
+                const strength = (shake.strength != null) ? shake.strength : 12;
+                this._combatShakeTimer = Math.max(this._combatShakeTimer, timer);
+                this._combatShakeStrength = Math.max(this._combatShakeStrength, strength);
+            }
+
+            for (const tgt of this.fighters) {
+                if (tgt === f || !tgt.isAlive || tgt.invincible) continue;
+                if (!tgt.grounded) continue;
+                if (platform) {
+                    if (tgt._ridingPlatform !== platform) continue;
+                } else if (tgt._ridingPlatform) {
+                    continue;
+                }
+
+                const tx = tgt.x + tgt.width / 2;
+                const ty = tgt.y + tgt.height / 2;
+                const dist = Math.hypot(tx - ax, ty - ay);
+                const damage = dist <= closeRadius ? closeDamage : baseDamage;
+
+                const hitbox = new SMASH.Hitbox({
+                    shape: 'circle',
+                    ownerPort: f.port,
+                    offsetX: 0,
+                    offsetY: 0,
+                    width: 1,
+                    height: 1,
+                    radius: 1,
+                    damage: damage,
+                    baseKB: baseKB,
+                    kbScaling: kbScaling,
+                    angle: angle,
+                    activeFrames: 1,
+                });
+
+                tgt.takeHit(hitbox, f.facing, true, false);
+                tgt._lastHitBy = f.port;
+                if (this._stats[f.port]) this._stats[f.port].damageDealt += damage;
+                f._lastHitWasSpecial = true;
             }
         }
 
@@ -903,6 +974,20 @@ class Game {
                     tgt._lastHitBy = atk.port;
                     this._stats[atk.port].damageDealt += atk.activeHitbox.damage;
 
+                    if (atk._pendingTempSpriteOnHit) {
+                        const tmp = atk._pendingTempSpriteOnHit;
+                        atk._pendingTempSpriteOnHit = null;
+                        atk._applyTempSprite(tmp.src, tmp.duration, tmp.audio || null);
+                    }
+
+                    if (atk.currentAttack && atk.currentAttack.screenShake) {
+                        const shake = atk.currentAttack.screenShake;
+                        const timer = (shake && shake.timer != null) ? shake.timer : 0.22;
+                        const strength = (shake && shake.strength != null) ? shake.strength : 12;
+                        this._combatShakeTimer = Math.max(this._combatShakeTimer, timer);
+                        this._combatShakeStrength = Math.max(this._combatShakeStrength, strength);
+                    }
+
                     // ── Damage multiplier hit tracking (Fazbear) ─
                     if (atk.boostedHitsLeft > 0) {
                         atk.boostedHitsLeft--;
@@ -914,6 +999,21 @@ class Game {
                     // ── Slippery effect (Baby Oil) ───────────────
                     if (atk.currentAttack && atk.currentAttack.makesSlippery) {
                         tgt.slipperyTimer = S.SLIPPERY_DURATION_FRAMES;
+                    }
+
+                    // ── Alfgar Bounce: squish grounded targets ──
+                    if (atk.data && atk.data.key === 'alfgar' &&
+                        atk.currentAttack === atk.data.attacks['up_special'] &&
+                        tgt.grounded) {
+                        const squash = atk.currentAttack;
+                        tgt._squishTimer = Math.max(tgt._squishTimer || 0,
+                            squash.squishDurationFrames || 600);
+                        tgt._squishSpeedMult = Math.min(
+                            tgt._squishSpeedMult || 1.0,
+                            squash.squishSpeedMult || 0.6
+                        );
+                        tgt._squishScaleX = squash.squishScaleX || 1.25;
+                        tgt._squishScaleY = squash.squishScaleY || 0.7;
                     }
 
                     // ── Pogo bounce: down-air on top → attacker bounces ──
@@ -1115,6 +1215,9 @@ class Game {
             f.fastFalling    = false;
             f._lastHitBy     = undefined;
             f._projSpawned   = false;
+            f._tempSpriteTimer = 0;
+            f._pendingTempSpriteOnHit = null;
+            if (f._restoreTempSprite) f._restoreTempSprite();
             // Clear grab state
             f.isGrabbed      = false;
             f.grabbedByPort  = -1;
@@ -1216,6 +1319,12 @@ class Game {
             const amp = Math.max(0, this._intro.shakeStrength * n);
             shakeX = (Math.random() * 2 - 1) * amp;
             shakeY = (Math.random() * 2 - 1) * amp * 0.6;
+        }
+        if (this._combatShakeTimer > 0) {
+            const n = this._combatShakeTimer / 0.22;
+            const amp = Math.max(0, this._combatShakeStrength * n);
+            shakeX += (Math.random() * 2 - 1) * amp;
+            shakeY += (Math.random() * 2 - 1) * amp * 0.6;
         }
 
         ctx.save();
@@ -1319,6 +1428,7 @@ class Game {
         }
         ctx.restore();
     }
+
 
     _renderBattleIntro(ctx) {
         if (!this._intro.active) return;

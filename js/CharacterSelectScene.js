@@ -518,7 +518,7 @@ class CharacterSelectScene {
             this.startHovered = false;
             return;
         }
-        if (this._justPressed('Enter')) {
+        if (this._justPressed('Enter') || this._justPressed('NumpadEnter')) {
             this._startMatch();
         }
     }

@@ -37,6 +37,18 @@ const TIER_ROWS = [
                 who: 'Sahur is a bat-focused fighter that can quickly build meter and force explosive mid-game swings.',
                 why: 'Placed in OP for dominant charged pressure, very high kill threat, and explosive momentum from Bat Breaker setups.'
             },
+            {
+                name: 'Alfgar Yolanda',
+                sprite: 'assets/alfgar (2).png',
+                who: 'Alfgar is a durable brawler who can shrug off pressure with dodge windows and swing back with massive slams.',
+                why: 'Placed in OP because his Belly Flop threat, evasive specials, and fast meter charging give him overwhelming control.'
+            },
+            {
+                name: 'Omni Man',
+                sprite: 'assets/Sprite_Omni Man.png',
+                who: 'Omni Man is a brutal enforcer with explosive specials and overwhelming burst damage.',
+                why: 'Placed in OP for massive special damage, lethal ultimate pressure, and swingy momentum control.'
+            },
         ],
     },
     {

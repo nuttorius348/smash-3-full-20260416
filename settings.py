@@ -26,6 +26,7 @@ KB_MATCH_TIME_CAP = 1.25          # max time multiplier (caps at +25%)
 # Knockback — instant KO
 INSTANT_KO_THRESHOLD = 250.0      # damage % at which specials insta-kill
 INSTANT_KO_KB = 2000.0            # guaranteed blast-zone exit magnitude
+ULTIMATE_KO_THRESHOLD = 150.0     # ultimates insta-kill at/above this %
 
 # Knockback — reduced stun
 HITSTUN_MAX_FRAMES = 90           # hard cap (~1.5 s at 60 fps)
@@ -45,6 +46,7 @@ VELOCITY_CAP = 2400.0             # hard speed cap (px/s)
 ULTIMATE_METER_MAX = 100.0
 DAMAGE_TO_METER_RATIO = 0.6  # meter gained per 1% damage taken
 ULTIMATE_CHARGE_CAP = 200.0   # no charging above this %
+ULTIMATE_COOLDOWN_SECONDS = 60.0
 
 # Respawn
 RESPAWN_INVINCIBILITY_FRAMES = 120  # 2 seconds at 60fps

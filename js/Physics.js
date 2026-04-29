@@ -17,6 +17,8 @@ class Physics {
 
     /** Per-frame update for one fighter. */
     update(f, stage, dt) {
+        const wasGrounded = f.grounded;
+
         // ── Gravity ──────────────────────────────────────────────
         if (!f.grounded) {
             let g = this.gravity;
@@ -42,11 +44,21 @@ class Physics {
         // ── Platform collision ───────────────────────────────────
         f.grounded = false;
         f._ridingPlatform = null;
+        f._justLanded = false;
 
         for (const plat of stage.platforms) {
             if (this._collidePlatform(f, plat)) {
                 f._ridingPlatform = plat;
                 break;
+            }
+        }
+
+        if (f.grounded && !wasGrounded) {
+            f._justLanded = true;
+            f._landedPlatform = f._ridingPlatform;
+            if (f._alfgarBellyFlopRotate) {
+                f._alfgarBellyFlopRotate = false;
+                f._alfgarBellyFlopSlam = true;
             }
         }
 
