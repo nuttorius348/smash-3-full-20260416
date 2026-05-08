@@ -40,6 +40,13 @@ const TEAM_COLORS = ['#f44', '#44f', '#0c6', '#fa0'];
 const TEAM_NAMES  = ['Red', 'Blue', 'Green', 'Orange'];
 const DRAFT_QUEUE_SIZE = 3;
 
+function getSelectableKeys() {
+    if (SMASH.Unlocks && typeof SMASH.Unlocks.getSelectableCharacterKeys === 'function') {
+        return SMASH.Unlocks.getSelectableCharacterKeys();
+    }
+    return typeof SMASH.getCharacterKeys === 'function' ? SMASH.getCharacterKeys() : [];
+}
+
 class MultiplayerScene {
     constructor(canvas, options) {
         this.canvas = canvas;
@@ -71,7 +78,7 @@ class MultiplayerScene {
         this._connectStatus = '';
 
         // ── Lobby state (per-slot arrays) ──────────────────────────
-        this._allKeys   = SMASH.getCharacterKeys();
+        this._allKeys   = getSelectableKeys();
         this._cursor    = 0;
         this._myName    = 'Player';
 

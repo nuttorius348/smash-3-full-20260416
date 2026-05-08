@@ -15,6 +15,13 @@
 (function () {
 const S = SMASH.Settings;
 
+function getSelectableKeys() {
+    if (SMASH.Unlocks && typeof SMASH.Unlocks.getSelectableCharacterKeys === 'function') {
+        return SMASH.Unlocks.getSelectableCharacterKeys();
+    }
+    return typeof SMASH.getCharacterKeys === 'function' ? SMASH.getCharacterKeys() : [];
+}
+
 // Bracket seed matchups: [seed1, seed2] index into top8 array
 const BRACKET_MATCHUPS = [
     [0, 7],  // 1 vs 8
@@ -43,7 +50,7 @@ class TournamentScene {
         this._deviceMgr = (options && options.deviceMgr) || null;
 
         // All 16 characters
-        this._allKeys = SMASH.getCharacterKeys();
+        this._allKeys = getSelectableKeys();
 
         // ── Phase state ────────────────────────────────────────────
         // Phases: 'setup' | 'groupStage' | 'bracketReveal' | 'bracket' | 'finished'

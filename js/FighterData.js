@@ -3117,7 +3117,7 @@ omniAttacks.side_special = {
     tempSpriteDuration: 2.0,
     soundEffect: 'assets/Omni Man_Side Soundeffect.mp3',
     suppressDefaultSpecialSfx: true,
-    delayHitUntilSpriteEnd: true,
+    delayHitUntilAudioEnd: true,
 };
 
 omniAttacks.neutral_special = {
@@ -3153,6 +3153,354 @@ ROSTER.omni_man = Object.assign({}, ROSTER.brawler, {
         spawnsProjectile: false,
         instantKO: true,
     },
+});
+
+// ═════════════════════════════════════════════════════════════════
+//  Ultra Lazer (Dungeon unlock)
+// ═════════════════════════════════════════════════════════════════
+ROSTER.ultra_lazer = Object.assign({}, ROSTER.brawler, {
+    name:        'Ultra Lazer',
+    color:       '#ff7d2d',
+    description: 'Dungeon power-up form of Lazer with a charged beam arsenal.',
+    idleSprite:  'assets/UltraLazer_sprite.png',
+});
+
+// Buff Ultra Lazer stats and specials (standalone playable form).
+const ultraAttacks = {};
+for (const [key, atk] of Object.entries(ROSTER.brawler.attacks)) {
+    ultraAttacks[key] = Object.assign({}, atk);
+}
+
+ultraAttacks.neutral_special = {
+    name: 'Charge Beam',
+    sprite: 'assets/UltraLazer_sprite neutral.gif',
+    hitboxShape: 'rect',
+    hitboxX: 40, hitboxY: -6, hitboxW: 60, hitboxH: 24, hitboxR: 12,
+    damage: 0, baseKB: 0, kbScaling: 0, angle: 0,
+    startupFrames: 12, activeFrames: 4, endlagFrames: 18,
+    spawnsProjectile: true,
+    projectileType: 'laser',
+    projSpeed: 1600,
+    projLifetime: 80,
+    projDamage: 35,
+    projKB: 200,
+    projKBScaling: 0.8,
+    projShape: 'rect',
+    projW: 220,
+    projH: 14,
+    projPiercing: true,
+    projMaxHits: 5,
+    projTrail: 18,
+    projStageCollision: 'none',
+    projLaunchAngle: 0,
+    projSpreadAngles: [-18, -9, 0, 9, 18],
+    chargeable: true,
+    maxChargeFrames: 180,
+    chargeDamageMin: 35,
+    chargeDamageMax: 100,
+    chargeBaseKBMin: 220,
+    chargeBaseKBMax: 520,
+    chargeSizeMin: 1.0,
+    chargeSizeMax: 1.8,
+    chargeSprite: 'assets/UltraLazer_sprite neutral.gif',
+    chargeSound: 'assets/UltraLazer_soundeffect neutral charge.mp3',
+    releaseSound: 'assets/UltraLazer_soundeffect fire.mp3',
+};
+
+ultraAttacks.side_special = {
+    name: 'Ultra Punch',
+    sprite: 'assets/UltraLazer_sprite side.gif',
+    hitboxShape: 'rect',
+    hitboxX: 50, hitboxY: -8, hitboxW: 90, hitboxH: 42, hitboxR: 38,
+    damage: 40, baseKB: 420, kbScaling: 1.3, angle: 38,
+    startupFrames: 10, activeFrames: 3, endlagFrames: 22,
+    spawnsProjectile: false,
+    boostVX: 520,
+    tempSprite: 'assets/UltraLazer_sprite side.gif',
+    tempSpriteDuration: 0.7,
+    soundEffect: 'assets/UltraLazer_soundeffect side.mp3',
+    suppressDefaultSpecialSfx: true,
+};
+
+ultraAttacks.up_special = {
+    name: 'Super Jump',
+    sprite: 'assets/UltraLazer_sprite up.gif',
+    hitboxShape: 'circle',
+    hitboxX: 0, hitboxY: -40, hitboxW: 50, hitboxH: 60, hitboxR: 30,
+    damage: 8, baseKB: 190, kbScaling: 0.9, angle: 80,
+    startupFrames: 4, activeFrames: 6, endlagFrames: 16,
+    spawnsProjectile: false,
+    boostVX: 0, boostVY: -1200,
+    tempSprite: 'assets/UltraLazer_sprite up.gif',
+    tempSpriteDuration: 0.8,
+};
+
+ultraAttacks.down_special = {
+    name: 'Dive Pound',
+    sprite: 'assets/UltraLazer_sprite down.gif',
+    hitboxShape: 'circle',
+    hitboxX: 0, hitboxY: 30, hitboxW: 150, hitboxH: 110, hitboxR: 80,
+    damage: 40, baseKB: 360, kbScaling: 1.4, angle: 70,
+    startupFrames: 10, activeFrames: 6, endlagFrames: 26,
+    spawnsProjectile: false,
+    boostVX: 0, boostVY: 920,
+    isArmored: true, armorHits: 2, armorDuringStartup: true,
+    screenShake: { timer: 0.24, strength: 16 },
+    groundSlamDamage: 40,
+    groundSlamCloseDamage: 40,
+    groundSlamCloseRadius: 200,
+    groundSlamBaseKB: 360,
+    groundSlamKbScaling: 1.1,
+    groundSlamAngle: 70,
+    groundSlamAllPlatforms: true,
+    groundSlamSprite: 'assets/UltraLazer_sprite down.gif',
+    groundSlamSpriteDuration: 0.8,
+};
+
+ROSTER.ultra_lazer.attacks = ultraAttacks;
+ROSTER.ultra_lazer.walkSpeed = Math.round(ROSTER.ultra_lazer.walkSpeed * 1.18);
+ROSTER.ultra_lazer.runSpeed = Math.round(ROSTER.ultra_lazer.runSpeed * 1.18);
+ROSTER.ultra_lazer.airSpeed = Math.round(ROSTER.ultra_lazer.airSpeed * 1.12);
+ROSTER.ultra_lazer.jumpForce = Math.round(ROSTER.ultra_lazer.jumpForce * 1.1);
+ROSTER.ultra_lazer.shortHopForce = Math.round(ROSTER.ultra_lazer.shortHopForce * 1.1);
+ROSTER.ultra_lazer.doubleJumpForce = Math.round(ROSTER.ultra_lazer.doubleJumpForce * 1.1);
+ROSTER.ultra_lazer.maxJumps = 3;
+ROSTER.ultra_lazer.ultimateAttack = Object.assign({}, ROSTER.brawler.ultimateAttack, {
+    sprite: 'assets/UltraLazer_sprite.png',
+    cutsceneVideo: 'assets/Ultimate_UltraLazer.mp4',
+    damage: Math.round(ROSTER.brawler.ultimateAttack.damage * 1.3),
+    baseKB: Math.round(ROSTER.brawler.ultimateAttack.baseKB * 1.25),
+});
+
+// ═════════════════════════════════════════════════════════════════
+//  Cell forms (boss-only; Super Perfect Cell is unlockable)
+// ═════════════════════════════════════════════════════════════════
+function _cloneAttacks(src) {
+    const out = {};
+    for (const [key, atk] of Object.entries(src || {})) {
+        out[key] = Object.assign({}, atk);
+    }
+    return out;
+}
+
+function _stripAttackVisuals(attacks, sprite) {
+    for (const atk of Object.values(attacks)) {
+        if (!atk) continue;
+        if (sprite) atk.sprite = sprite;
+        delete atk.tempSprite;
+        delete atk.tempSpriteDuration;
+        delete atk.tempSpriteOnHit;
+        delete atk.delayHitUntilSpriteEnd;
+        delete atk.soundEffect;
+        delete atk.chargeSprite;
+    }
+}
+
+function _scaleAttackSet(attacks, mult) {
+    for (const atk of Object.values(attacks)) {
+        if (!atk) continue;
+        if (typeof atk.damage === 'number') atk.damage *= mult;
+        if (typeof atk.baseKB === 'number') atk.baseKB *= mult;
+        if (typeof atk.kbScaling === 'number') atk.kbScaling *= mult;
+        if (typeof atk.projDamage === 'number') atk.projDamage *= mult;
+        if (typeof atk.projKB === 'number') atk.projKB *= mult;
+        if (typeof atk.projKBScaling === 'number') atk.projKBScaling *= mult;
+    }
+}
+
+const imperfectAttacks = _cloneAttacks(ROSTER.ultra_lazer.attacks);
+_stripAttackVisuals(imperfectAttacks, 'assets/ImperfectCell_sprite.png');
+imperfectAttacks.neutral_special = {
+    name: 'Absorption Charge',
+    sprite: 'assets/ImperfectCell_sprite.png',
+    hitboxShape: 'circle',
+    hitboxX: 0, hitboxY: 0, hitboxW: 80, hitboxH: 80, hitboxR: 40,
+    damage: 8, baseKB: 110, kbScaling: 0.4, angle: 25,
+    startupFrames: 6, activeFrames: 4, endlagFrames: 16,
+    spawnsProjectile: false,
+    chargesUltOnHit: true,
+    chargesUltAmount: 100,
+};
+
+const semiAttacks = _cloneAttacks(imperfectAttacks);
+_scaleAttackSet(semiAttacks, 2);
+_stripAttackVisuals(semiAttacks, 'assets/SemiPerfectCell_sprite.png');
+
+const perfectAttacks = _cloneAttacks(semiAttacks);
+_scaleAttackSet(perfectAttacks, 2);
+_stripAttackVisuals(perfectAttacks, 'assets/PerfectCell_sprite.png');
+perfectAttacks.neutral_special = {
+    name: 'Perfect Beam',
+    sprite: 'assets/PerfectCell_sprite.png',
+    hitboxShape: 'rect',
+    hitboxX: 40, hitboxY: -6, hitboxW: 60, hitboxH: 24, hitboxR: 12,
+    damage: 0, baseKB: 0, kbScaling: 0, angle: 0,
+    startupFrames: 10, activeFrames: 4, endlagFrames: 18,
+    spawnsProjectile: true,
+    projectileType: 'laser',
+    projSpeed: 1750,
+    projLifetime: 90,
+    projDamage: 120,
+    projKB: 380,
+    projKBScaling: 1.1,
+    projShape: 'rect',
+    projW: 520,
+    projH: 18,
+    projPiercing: true,
+    projMaxHits: 6,
+    projTrail: 18,
+    projStageCollision: 'none',
+    projLaunchAngle: 0,
+};
+
+const superAttacks = _cloneAttacks(ROSTER.brawler.attacks);
+superAttacks.neutral_special = {
+    name: 'Kamehameha',
+    sprite: 'assets/SuperPerfectCell_sprite neutral charge.gif',
+    hitboxShape: 'rect',
+    hitboxX: 40, hitboxY: -6, hitboxW: 60, hitboxH: 24, hitboxR: 12,
+    damage: 0, baseKB: 0, kbScaling: 0, angle: 0,
+    startupFrames: 12, activeFrames: 4, endlagFrames: 20,
+    spawnsProjectile: true,
+    projectileType: 'laser',
+    projSpeed: 1900,
+    projLifetime: 100,
+    projDamage: 80,
+    projKB: 260,
+    projKBScaling: 0.9,
+    projShape: 'rect',
+    projW: 620,
+    projH: 22,
+    projPiercing: true,
+    projMaxHits: 7,
+    projTrail: 20,
+    projStageCollision: 'none',
+    projLaunchAngle: 0,
+    projSpreadAngles: [0],
+    chargeable: true,
+    maxChargeFrames: 210,
+    chargeDamageMin: 80,
+    chargeDamageMax: 300,
+    chargeBaseKBMin: 260,
+    chargeBaseKBMax: 650,
+    chargeSizeMin: 1.0,
+    chargeSizeMax: 2.0,
+    chargeSprite: 'assets/SuperPerfectCell_sprite neutral charge.gif',
+    chargeSound: 'assets/UltraLazer_soundeffect neutral charge.mp3',
+    releaseSound: 'assets/UltraLazer_soundeffect fire.mp3',
+};
+
+superAttacks.side_special = {
+    name: 'Instant Transmission Kick',
+    sprite: 'assets/SuperPerfectCell_sprite side.gif',
+    hitboxShape: 'rect',
+    hitboxX: 40, hitboxY: -6, hitboxW: 90, hitboxH: 44, hitboxR: 36,
+    damage: 60, baseKB: 420, kbScaling: 1.25, angle: 35,
+    startupFrames: 6, activeFrames: 3, endlagFrames: 18,
+    spawnsProjectile: false,
+    tempSprite: 'assets/SuperPerfectCell_sprite side.gif',
+    tempSpriteDuration: 0.7,
+    soundEffect: 'assets/SuperPerfectCell_soundeffect side.mp3',
+    suppressDefaultSpecialSfx: true,
+};
+
+superAttacks.up_special = {
+    name: 'Fly',
+    sprite: 'assets/SuperPerfectCell_sprite up.gif',
+    hitboxShape: 'circle',
+    hitboxX: 0, hitboxY: -40, hitboxW: 50, hitboxH: 60, hitboxR: 30,
+    damage: 6, baseKB: 160, kbScaling: 0.8, angle: 80,
+    startupFrames: 4, activeFrames: 6, endlagFrames: 16,
+    spawnsProjectile: false,
+    boostVX: 0, boostVY: -1300,
+    tempSprite: 'assets/SuperPerfectCell_sprite up.gif',
+    tempSpriteDuration: 0.8,
+};
+
+superAttacks.down_special = {
+    name: 'Ground Pownd',
+    sprite: 'assets/SuperPerfectCell_sprite down.gif',
+    hitboxShape: 'circle',
+    hitboxX: 0, hitboxY: 30, hitboxW: 150, hitboxH: 110, hitboxR: 80,
+    damage: 0, baseKB: 360, kbScaling: 1.3, angle: 70,
+    startupFrames: 10, activeFrames: 6, endlagFrames: 26,
+    spawnsProjectile: false,
+    boostVX: 0, boostVY: 900,
+    isArmored: true, armorHits: 2, armorDuringStartup: true,
+    screenShake: { timer: 0.26, strength: 18 },
+    groundSlamDamage: 40,
+    groundSlamCloseDamage: 40,
+    groundSlamCloseRadius: 200,
+    groundSlamBaseKB: 360,
+    groundSlamKbScaling: 1.1,
+    groundSlamAngle: 70,
+    groundSlamSprite: 'assets/SuperPerfectCell_sprite down.gif',
+    groundSlamSpriteDuration: 0.8,
+};
+
+ROSTER.cell = Object.assign({}, ROSTER.ultra_lazer, {
+    name:        'Imperfect Cell',
+    color:       '#2ecc71',
+    description: 'Imperfect form of Cell.',
+    idleSprite:  'assets/ImperfectCell_sprite.png',
+    selectable:  false,
+    attacks:     imperfectAttacks,
+    ultimateAttack: Object.assign({}, ROSTER.ultra_lazer.ultimateAttack, {
+        name: 'Imperfect Ascension',
+        sprite: 'assets/ImperfectCell_sprite.png',
+        cutsceneVideo: 'assets/ImperfectCell_Ultimate.mp4',
+    }),
+});
+
+ROSTER.cell_semi = Object.assign({}, ROSTER.ultra_lazer, {
+    name:        'Semi-Perfect Cell',
+    color:       '#27ae60',
+    description: 'Semi-perfect Cell form.',
+    idleSprite:  'assets/SemiPerfectCell_sprite.png',
+    selectable:  false,
+    attacks:     semiAttacks,
+    ultimateAttack: Object.assign({}, ROSTER.ultra_lazer.ultimateAttack, {
+        name: 'Semi-Perfect Surge',
+        sprite: 'assets/SemiPerfectCell_sprite.png',
+        cutsceneVideo: 'assets/SemiPerfect_Ultimate.mp4',
+        damage: Math.round(ROSTER.ultra_lazer.ultimateAttack.damage * 2),
+        baseKB: Math.round(ROSTER.ultra_lazer.ultimateAttack.baseKB * 2),
+    }),
+});
+
+ROSTER.cell_perfect = Object.assign({}, ROSTER.ultra_lazer, {
+    name:        'Perfect Cell',
+    color:       '#1abc9c',
+    description: 'Perfect Cell form.',
+    idleSprite:  'assets/PerfectCell_sprite.png',
+    selectable:  false,
+    attacks:     perfectAttacks,
+    ultimateAttack: {
+        name: 'No Ultimate',
+        sprite: 'assets/PerfectCell_sprite.png',
+        cutsceneVideo: '',
+        hitboxShape: 'circle',
+        hitboxX: 0, hitboxY: 0, hitboxW: 1, hitboxH: 1, hitboxR: 1,
+        damage: 0, baseKB: 0, kbScaling: 0, angle: 0,
+        startupFrames: 0, activeFrames: 0, endlagFrames: 0,
+        spawnsProjectile: false,
+        disableUltimate: true,
+    },
+});
+
+ROSTER.super_perfect_cell = Object.assign({}, ROSTER.brawler, {
+    name:        'Super Perfect Cell',
+    color:       '#16a085',
+    description: 'Final Cell form unlocked in Dungeon mode.',
+    idleSprite:  'assets/SuperPerfectCell_sprite.png',
+    attacks:     superAttacks,
+    ultimateAttack: Object.assign({}, ROSTER.brawler.ultimateAttack, {
+        name: 'Super Perfect Cataclysm',
+        sprite: 'assets/SuperPerfectCell_sprite.png',
+        cutsceneVideo: 'assets/SuperPerfectCell_Ultimate.mp4',
+        damage: Math.round(ROSTER.brawler.ultimateAttack.damage * 1.6),
+        baseKB: Math.round(ROSTER.brawler.ultimateAttack.baseKB * 1.4),
+    }),
 });
 
 

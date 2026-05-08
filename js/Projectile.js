@@ -858,46 +858,98 @@ class ProjectileManager {
         const sx = fighter.x + fighter.width / 2 + (atk.projSpawnX || 30) * fighter.facing;
         const sy = fighter.y + fighter.height / 2 + (atk.projSpawnY || 0);
 
-        // Compute velocity (support angled launches)
+        const spreadAngles = Array.isArray(atk.projSpreadAngles) && atk.projSpreadAngles.length
+            ? atk.projSpreadAngles
+            : [0];
+        const baseAngle = atk.projLaunchAngle || 0;
         const speed = atk.projSpeed || 650;
-        const launchAngle = (atk.projLaunchAngle || 0) * Math.PI / 180;
-        const vx = Math.cos(launchAngle) * speed * fighter.facing;
-        const vy = -Math.sin(launchAngle) * speed;
-
         const type = atk.projectileType || 'linear';
         const Cls  = TYPE_MAP[type] || LinearProjectile;
 
         // Apply fighter's damage multiplier (e.g. Fazbear's stacking boost)
         const mult = fighter.damageMultiplier || 1.0;
 
-        this.spawn(new Cls({
-            ownerPort:      fighter.port,
-            x: sx, y: sy,
-            vx, vy,
-            w:              atk.projW || 22,
-            h:              atk.projH || 22,
-            radius:         atk.projR || Math.max(atk.projW || 22, atk.projH || 22) / 2,
-            shape:          atk.projShape || 'circle',
-            damage:         (atk.projDamage   || atk.damage) * mult,
-            baseKB:         (atk.projKB       || 150) * mult,
-            kbScaling:      atk.projKBScaling || atk.kbScaling || 0.7,
-            angle:          atk.projAngle    || 30,
-            lifetime:       atk.projLifetime || 100,
-            gravity:        atk.projGravity  || 0,
-            stageCollision: atk.projStageCollision || 'none',
-            bounciness:     atk.projBounciness,
-            maxBounces:     atk.projMaxBounces,
-            piercing:       atk.projPiercing || false,
-            maxHits:        atk.projMaxHits  || 0,
-            trailLength:    atk.projTrail    || 0,
-            color:          atk.projColor,
-            groundSnap:     atk.projGroundSnap || false,
-            explosionRadius: atk.projExplosionRadius,
-            explosionDamage: atk.projExplosionDamage ? atk.projExplosionDamage * mult : undefined,
-            explosionKB:     atk.projExplosionKB ? atk.projExplosionKB * mult : undefined,
-            explosionLife:   atk.projExplosionLife,
-            gravScale:       atk.projGravity,
-        }));
+        const chargeActive = !!(fighter && fighter._ultraChargeAttack === atk);
+        const chargeRatio = chargeActive
+            ? Math.max(0, Math.min(1, fighter._ultraChargeRatio || 0))
+            : 0;
+
+        let chargeDamage = null;
+        if (chargeActive && typeof fighter._ultraChargeDamage === 'number') {
+            chargeDamage = fighter._ultraChargeDamage;
+        } else if (chargeActive && (atk.chargeDamageMin != null || atk.chargeDamageMax != null)) {
+            const minD = atk.chargeDamageMin != null ? atk.chargeDamageMin : (atk.projDamage || atk.damage || 0);
+            const maxD = atk.chargeDamageMax != null ? atk.chargeDamageMax : minD;
+            chargeDamage = minD + (maxD - minD) * chargeRatio;
+        }
+
+        let chargeBaseKB = null;
+        if (chargeActive && typeof fighter._ultraChargeBaseKB === 'number') {
+            chargeBaseKB = fighter._ultraChargeBaseKB;
+        } else if (chargeActive && (atk.chargeBaseKBMin != null || atk.chargeBaseKBMax != null)) {
+            const minKB = atk.chargeBaseKBMin != null ? atk.chargeBaseKBMin : (atk.projKB || 150);
+            const maxKB = atk.chargeBaseKBMax != null ? atk.chargeBaseKBMax : minKB;
+            chargeBaseKB = minKB + (maxKB - minKB) * chargeRatio;
+        }
+
+        let sizeMult = 1;
+        if (chargeActive && fighter && fighter._ultraChargeSizeMult) {
+            sizeMult = fighter._ultraChargeSizeMult;
+        } else if (chargeActive && (atk.chargeSizeMin != null || atk.chargeSizeMax != null)) {
+            const minSize = atk.chargeSizeMin != null ? atk.chargeSizeMin : 1;
+            const maxSize = atk.chargeSizeMax != null ? atk.chargeSizeMax : minSize;
+            sizeMult = minSize + (maxSize - minSize) * chargeRatio;
+        }
+
+        const baseW = atk.projW || 22;
+        const baseH = atk.projH || 22;
+
+        const projDamage = chargeDamage != null
+            ? chargeDamage
+            : (atk.projDamage || atk.damage) * mult;
+        const projBaseKB = chargeBaseKB != null
+            ? chargeBaseKB
+            : (atk.projKB || 150) * mult;
+        const projKbScaling = atk.projKBScaling || atk.kbScaling || 0.7;
+
+        for (const spread of spreadAngles) {
+            const launchAngle = (baseAngle + spread) * Math.PI / 180;
+            const vx = Math.cos(launchAngle) * speed * fighter.facing;
+            const vy = -Math.sin(launchAngle) * speed;
+
+            this.spawn(new Cls({
+                ownerPort:      fighter.port,
+                x: sx, y: sy,
+                vx, vy,
+                w:              baseW * sizeMult,
+                h:              baseH * sizeMult,
+                radius:         atk.projR || Math.max(baseW * sizeMult, baseH * sizeMult) / 2,
+                shape:          atk.projShape || 'circle',
+                damage:         projDamage,
+                baseKB:         projBaseKB,
+                kbScaling:      projKbScaling,
+                angle:          atk.projAngle    || 30,
+                lifetime:       atk.projLifetime || 100,
+                gravity:        atk.projGravity  || 0,
+                stageCollision: atk.projStageCollision || 'none',
+                bounciness:     atk.projBounciness,
+                maxBounces:     atk.projMaxBounces,
+                piercing:       atk.projPiercing || false,
+                maxHits:        atk.projMaxHits  || 0,
+                trailLength:    atk.projTrail    || 0,
+                color:          atk.projColor,
+                groundSnap:     atk.projGroundSnap || false,
+                explosionRadius: atk.projExplosionRadius,
+                explosionDamage: atk.projExplosionDamage ? atk.projExplosionDamage * mult : undefined,
+                explosionKB:     atk.projExplosionKB ? atk.projExplosionKB * mult : undefined,
+                explosionLife:   atk.projExplosionLife,
+                gravScale:       atk.projGravity,
+            }));
+        }
+
+        if (chargeActive) {
+            fighter._ultraChargeAttack = null;
+        }
     }
 
     /**

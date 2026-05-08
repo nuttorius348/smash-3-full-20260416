@@ -261,6 +261,10 @@ class Game {
                 p.controller.setContext(this.fighters, this.stage, this.projMgr.list);
             }
         }
+
+        for (const f of this.fighters) {
+            f._arenaFighters = this.fighters;
+        }
     }
 
     // ═════════════════════════════════════════════════════════════
@@ -385,7 +389,9 @@ class Game {
     _spawnWaveEnemy() {
         const num  = this._waveNumber;
         const idx  = this._waveSpawned;
-        const keys   = SMASH.getCharacterKeys();
+        const keys   = (SMASH.Unlocks && SMASH.Unlocks.getSelectableCharacterKeys)
+            ? SMASH.Unlocks.getSelectableCharacterKeys()
+            : SMASH.getCharacterKeys();
         const spawns = this.stage.spawns;
         const difficulty = Math.min(10, 2 + num);
 
@@ -413,6 +419,8 @@ class Game {
         this.fighters.push(fighter);
         this._waveEnemies.push(fighter);
         this._waveSpawned++;
+
+        fighter._arenaFighters = this.fighters;
 
         // Init stats for this enemy
         this._stats[wavePort] = {
@@ -815,6 +823,7 @@ class Game {
             const baseKB = slam.groundSlamBaseKB || slam.baseKB || 360;
             const kbScaling = slam.groundSlamKbScaling || slam.kbScaling || 1.5;
             const angle = slam.groundSlamAngle || 70;
+            const allPlatforms = !!slam.groundSlamAllPlatforms;
 
             if (slam.screenShake) {
                 const shake = slam.screenShake;
@@ -824,13 +833,19 @@ class Game {
                 this._combatShakeStrength = Math.max(this._combatShakeStrength, strength);
             }
 
+            if (slam.groundSlamSprite && typeof f._applyTempSprite === 'function') {
+                f._applyTempSprite(slam.groundSlamSprite, slam.groundSlamSpriteDuration || 0, null);
+            }
+
             for (const tgt of this.fighters) {
                 if (tgt === f || !tgt.isAlive || tgt.invincible) continue;
                 if (!tgt.grounded) continue;
-                if (platform) {
-                    if (tgt._ridingPlatform !== platform) continue;
-                } else if (tgt._ridingPlatform) {
-                    continue;
+                if (!allPlatforms) {
+                    if (platform) {
+                        if (tgt._ridingPlatform !== platform) continue;
+                    } else if (tgt._ridingPlatform) {
+                        continue;
+                    }
                 }
 
                 const tx = tgt.x + tgt.width / 2;
@@ -973,6 +988,14 @@ class Game {
                     tgt.takeHit(atk.activeHitbox, atk.facing, isSpec, isUlt);
                     tgt._lastHitBy = atk.port;
                     this._stats[atk.port].damageDealt += atk.activeHitbox.damage;
+
+                    if (atk.currentAttack && atk.currentAttack.chargesUltOnHit && !atk._chargedUltThisAttack) {
+                        const amount = (atk.currentAttack.chargesUltAmount != null)
+                            ? atk.currentAttack.chargesUltAmount
+                            : S.ULT_MAX;
+                        atk.ultimateMeter = Math.min(S.ULT_MAX, atk.ultimateMeter + amount);
+                        atk._chargedUltThisAttack = true;
+                    }
 
                     if (atk._pendingTempSpriteOnHit) {
                         const tmp = atk._pendingTempSpriteOnHit;

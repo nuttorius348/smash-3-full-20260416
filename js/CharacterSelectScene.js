@@ -32,6 +32,13 @@
 (function() {
 const S = SMASH.Settings;
 
+function getSelectableKeys() {
+    if (SMASH.Unlocks && typeof SMASH.Unlocks.getSelectableCharacterKeys === 'function') {
+        return SMASH.Unlocks.getSelectableCharacterKeys();
+    }
+    return typeof SMASH.getCharacterKeys === 'function' ? SMASH.getCharacterKeys() : [];
+}
+
 // ══════════════════════════════════════════════════════════════════
 //  PlayerSlot
 // ══════════════════════════════════════════════════════════════════
@@ -66,7 +73,7 @@ class PlayerSlot {
 
     cycleCharacter(dir) {
         if (this.ready) return;
-        const keys = SMASH.getCharacterKeys();
+        const keys = getSelectableKeys();
         const idx = keys.indexOf(this.characterKey);
         let next = idx + dir;
         if (next < 0) next = keys.length - 1;
@@ -218,7 +225,7 @@ class CharacterSelectScene {
     }
 
     _loadCharacterData() {
-        const keys = SMASH.getCharacterKeys();
+        const keys = getSelectableKeys();
         return keys.map(key => {
             const rosterData = SMASH.ROSTER[key];
             const fighterData = new SMASH.FighterData(key);  // Load FighterData for sprite

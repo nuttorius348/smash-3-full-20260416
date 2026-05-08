@@ -36,6 +36,10 @@ const multiplayerBtn = document.getElementById('multiplayerBtn');
 const controlsBtn   = document.getElementById('controlsBtn');
 const controlsPanel = document.getElementById('controlsPanel');
 const menuContent   = document.getElementById('menuContent');
+const introOverlay  = document.getElementById('introOverlay');
+const introVideo    = document.getElementById('introVideo');
+const introBtn      = document.getElementById('introBtn');
+const continueDungeonBtn = document.getElementById('continueDungeonBtn');
 
 // ── Device manager for controller auto-detection ────────────────
 const deviceMgr = new SMASH.DeviceManager();
@@ -56,6 +60,29 @@ function stopScan() {
 let activeScene      = null;
 let lastMenuSettings = {};
 let lastConfigs      = [];
+let introActive      = false;
+let introReturnToMenu = true;
+let introNeedsGestureAudio = false;
+
+const DUNGEON_SAVE_KEY = 'smash3_dungeon_save_v1';
+
+function hasDungeonSave() {
+    if (SMASH.Dungeon && typeof SMASH.Dungeon.hasSave === 'function') {
+        return SMASH.Dungeon.hasSave();
+    }
+    try {
+        return !!localStorage.getItem(DUNGEON_SAVE_KEY);
+    } catch (err) {
+        return false;
+    }
+}
+
+function syncDungeonContinueButton() {
+    if (!continueDungeonBtn) return;
+    const hasSave = hasDungeonSave();
+    continueDungeonBtn.disabled = !hasSave;
+    continueDungeonBtn.style.display = hasSave ? '' : 'none';
+}
 
 function applyGlobalSoundSetting(enabled) {
     if (SMASH.SFX && SMASH.SFX.setEnabled) SMASH.SFX.setEnabled(enabled !== false);
@@ -101,6 +128,60 @@ function showMenu() {
     const soundsToggle = document.getElementById('soundsToggle');
     if (soundsToggle) applyGlobalSoundSetting(!!soundsToggle.checked);
     SMASH.Music.play('main');
+    syncDungeonContinueButton();
+}
+
+function showIntro(options) {
+    const opts = options || {};
+    introReturnToMenu = opts.returnToMenu !== false;
+    introNeedsGestureAudio = false;
+
+    stopActiveScene();
+    stopScan();
+    SMASH.Music.stop();
+    canvas.style.display  = 'none';
+    menuDiv.style.display = 'none';
+    if (controlsPanel) controlsPanel.classList.add('hidden');
+    if (controlsBtn) controlsBtn.classList.remove('active');
+
+    if (!introOverlay || !introVideo) {
+        if (introReturnToMenu) showMenu();
+        return;
+    }
+
+    introActive = true;
+    introOverlay.classList.remove('hidden');
+    introOverlay.setAttribute('aria-hidden', 'false');
+    introVideo.pause();
+    introVideo.currentTime = 0;
+    introVideo.muted = false;
+    introVideo.playsInline = true;
+    const playPromise = introVideo.play();
+    if (playPromise && playPromise.catch) {
+        playPromise.catch(() => {
+            introVideo.muted = true;
+            introNeedsGestureAudio = true;
+            const retryPromise = introVideo.play();
+            if (retryPromise && retryPromise.catch) {
+                retryPromise.catch(() => {
+                    // Autoplay can still be blocked; user can press Enter to skip.
+                });
+            }
+        });
+    }
+}
+
+function endIntro() {
+    if (!introActive) return;
+    introActive = false;
+
+    if (introVideo) introVideo.pause();
+    if (introOverlay) {
+        introOverlay.classList.add('hidden');
+        introOverlay.setAttribute('aria-hidden', 'true');
+    }
+
+    if (introReturnToMenu) showMenu();
 }
 
 /**
@@ -249,6 +330,36 @@ function showTierList() {
 }
 
 /**
+ * Start Dungeon mode (single-player).
+ * @param {object} settings
+ * @param {object} options
+ */
+function showDungeon(settings, options) {
+    stopActiveScene();
+    stopScan();
+    lastMenuSettings = settings || lastMenuSettings;
+    menuDiv.style.display = 'none';
+    canvas.style.display  = 'block';
+    if (document.activeElement) document.activeElement.blur();
+
+    SMASH.Music.play('battle');
+
+    const scene = new SMASH.DungeonScene(canvas, {
+        deviceMgr: deviceMgr,
+        soundsEnabled: lastMenuSettings.soundsEnabled !== false,
+        ultimateVideos: lastMenuSettings.ultimateVideos !== false,
+        resume: !!(options && options.resume),
+        onBack: () => {
+            activeScene = null;
+            showMenu();
+        },
+    });
+
+    scene.start();
+    activeScene = scene;
+}
+
+/**
  * Start the Draft mode flow.
  * @param {object} settings
  */
@@ -392,6 +503,9 @@ function showMultiplayer(settings) {
  */
 function launchGameMode(settings) {
     switch (settings.gameMode) {
+        case 'dungeon':
+            showDungeon(settings, { resume: false });
+            break;
         case 'draft':
             showDraft(settings);
             break;
@@ -468,6 +582,19 @@ multiplayerBtn.addEventListener('click', () => {
     showMultiplayer(readMenuSettings());
 });
 
+// INTRO button → replay trailer
+if (introBtn) {
+    introBtn.addEventListener('click', () => {
+        showIntro({ returnToMenu: true });
+    });
+}
+
+if (continueDungeonBtn) {
+    continueDungeonBtn.addEventListener('click', () => {
+        showDungeon(readMenuSettings(), { resume: true });
+    });
+}
+
 // CONTROLS button
 if (controlsBtn && controlsPanel) {
     controlsBtn.addEventListener('click', () => {
@@ -475,11 +602,54 @@ if (controlsBtn && controlsPanel) {
         controlsPanel.classList.toggle('hidden', !isHidden);
         controlsBtn.classList.toggle('active', isHidden);
         requestAnimationFrame(fitMenuToViewport);
+        syncDungeonContinueButton();
+
+        if (SMASH.preloadGifs) {
+            SMASH.preloadGifs([
+                'assets/UltraLazer_sprite neutral.gif',
+                'assets/UltraLazer_sprite side.gif',
+                'assets/UltraLazer_sprite down.gif',
+                'assets/UltraLazer_sprite up.gif',
+                'assets/SuperPerfectCell_sprite neutral charge.gif',
+                'assets/SuperPerfectCell_sprite side.gif',
+                'assets/SuperPerfectCell_sprite down.gif',
+                'assets/SuperPerfectCell_sprite up.gif',
+            ]);
+        }
     });
 }
 
 // Note: global Enter-to-start is intentionally disabled.
 // Some systems/controllers emit phantom Enter events and could auto-launch matches.
+document.addEventListener('keydown', (e) => {
+    if (!introActive) return;
+    if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+        e.preventDefault();
+        endIntro();
+    }
+});
+
+document.addEventListener('click', () => {
+    if (!introActive || !introNeedsGestureAudio || !introVideo) return;
+    introNeedsGestureAudio = false;
+    introVideo.muted = false;
+    const p = introVideo.play();
+    if (p && p.catch) p.catch(() => {});
+});
+
+document.addEventListener('keydown', () => {
+    if (!introActive || !introNeedsGestureAudio || !introVideo) return;
+    introNeedsGestureAudio = false;
+    introVideo.muted = false;
+    const p = introVideo.play();
+    if (p && p.catch) p.catch(() => {});
+});
+
+if (introVideo) {
+    introVideo.addEventListener('ended', () => {
+        endIntro();
+    });
+}
 
 const gameModeSelect = document.getElementById('gameModeSelect');
 const draftModeRow = document.getElementById('draftModeRow');
@@ -501,9 +671,7 @@ window.addEventListener('gamepadconnected',    () => deviceMgr.scan());
 window.addEventListener('gamepaddisconnected', () => deviceMgr.scan());
 
 // ── Boot ─────────────────────────────────────────────────────────
-SMASH.Music.play('main');
-startScan();
-requestAnimationFrame(fitMenuToViewport);
+showIntro({ returnToMenu: true });
 
 // Browsers block autoplay until first user gesture — retry main theme
 document.addEventListener('click', function _firstGesture() {

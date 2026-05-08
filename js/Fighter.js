@@ -42,6 +42,17 @@ class GifSprite {
     }
 
     async _load() {
+        if (GifSprite._cache[this.src]) {
+            const cached = GifSprite._cache[this.src];
+            this.canvas.width = cached.width;
+            this.canvas.height = cached.height;
+            this.frames = cached.frames;
+            this.totalDurationMs = cached.totalDurationMs;
+            this._renderFrame(0);
+            this.ready = true;
+            if (this.onReady) this.onReady();
+            return;
+        }
         if (!window.gifuct || !window.gifuct.parseGIF || !window.gifuct.decompressFrames) {
             console.warn('gifuct-js not available; cannot animate GIF:', this.src);
             return;
@@ -61,6 +72,12 @@ class GifSprite {
             this.totalDurationMs = frames.reduce((sum, frame) => {
                 return sum + this._frameDurationMs(frame);
             }, 0);
+            GifSprite._cache[this.src] = {
+                width: w,
+                height: h,
+                frames: frames,
+                totalDurationMs: this.totalDurationMs,
+            };
             this._renderFrame(0);
             this.ready = true;
             if (this.onReady) this.onReady();
@@ -96,6 +113,38 @@ class GifSprite {
         }
     }
 }
+
+GifSprite._cache = {};
+
+GifSprite.preload = async function (sources) {
+    if (!window.gifuct || !window.gifuct.parseGIF || !window.gifuct.decompressFrames) return;
+    const list = Array.isArray(sources) ? sources : [];
+    for (const src of list) {
+        if (!src || GifSprite._cache[src]) continue;
+        try {
+            const res = await fetch(src);
+            const buf = await res.arrayBuffer();
+            const gif = window.gifuct.parseGIF(buf);
+            const frames = window.gifuct.decompressFrames(gif, true);
+            if (!frames || frames.length === 0) continue;
+            const w = gif.lsd && gif.lsd.width ? gif.lsd.width : frames[0].dims.width;
+            const h = gif.lsd && gif.lsd.height ? gif.lsd.height : frames[0].dims.height;
+            const totalDurationMs = frames.reduce((sum, frame) => {
+                const delay = frame && frame.delay ? frame.delay : 100;
+                return sum + Math.max(20, delay);
+            }, 0);
+            GifSprite._cache[src] = { width: w, height: h, frames, totalDurationMs };
+        } catch (err) {
+            console.warn('Failed to preload GIF:', src, err);
+        }
+    }
+};
+
+SMASH.preloadGifs = function (sources) {
+    if (GifSprite && GifSprite.preload) {
+        GifSprite.preload(sources);
+    }
+};
 
 const LOCKED = new Set([
     ST.ATTACK, ST.SPECIAL, ST.HITSTUN, ST.HELPLESS,
@@ -225,6 +274,28 @@ class Fighter {
             this._sahurSideReleaseAudio.preload = 'auto';
             this._sahurSideReleaseAudio.volume = 0.92;
         }
+
+        // Ultra Lazer charge state
+        this._ultraChargeFrames = 0;
+        this._ultraChargeRatio = 0;
+        this._ultraChargeAttack = null;
+        this._ultraChargeDamage = null;
+        this._ultraChargeBaseKB = null;
+        this._ultraChargeSizeMult = 1;
+        this._ultraChargeSpriteActive = false;
+        this._ultraChargeLoopAudio = null;
+        this._ultraChargeReleaseAudio = null;
+        if (this.data.key === 'ultra_lazer' || this.data.key === 'super_perfect_cell') {
+            this._ultraChargeLoopAudio = new Audio('assets/UltraLazer_soundeffect neutral charge.mp3');
+            this._ultraChargeLoopAudio.loop = true;
+            this._ultraChargeLoopAudio.preload = 'auto';
+            this._ultraChargeLoopAudio.volume = 0.8;
+            this._ultraChargeReleaseAudio = new Audio('assets/UltraLazer_soundeffect fire.mp3');
+            this._ultraChargeReleaseAudio.preload = 'auto';
+            this._ultraChargeReleaseAudio.volume = 0.9;
+        }
+
+        this._chargedUltThisAttack = false;
 
         // Stamina mode
         this.staminaHP    = 0;   // 0 = not stamina mode
@@ -479,6 +550,20 @@ class Fighter {
         this._sahurChargeRatio = 0;
         this._sahurFullChargeFlash = 0;
         this._sahurFullChargeTriggered = false;
+        this._chargedUltThisAttack = false;
+        this._stopUltraChargeLoopAudio();
+        this._ultraChargeFrames = 0;
+        this._ultraChargeRatio = 0;
+        this._ultraChargeAttack = null;
+        this._ultraChargeDamage = null;
+        this._ultraChargeBaseKB = null;
+        this._ultraChargeSizeMult = 1;
+        this._chargedUltThisAttack = false;
+        if (this._ultraChargeSpriteActive) {
+            this._tempSpriteTimer = 0;
+            this._restoreTempSprite();
+            this._ultraChargeSpriteActive = false;
+        }
 
         this.currentAttack = atk;
         this._atkPhase = 'startup';
@@ -507,7 +592,7 @@ class Fighter {
             this._delayHitSpriteTimer = 0;
         }
 
-        if (this.data.key === 'alfgar' && key === 'down_special') {
+        if ((this.data.key === 'alfgar' || this.data.key === 'ultra_lazer') && key === 'down_special') {
             this._alfgarBellyFlopRotate = true;
         }
 
@@ -523,6 +608,10 @@ class Fighter {
         if (atk.invincibleFrames) {
             this._invFrames = Math.max(this._invFrames, atk.invincibleFrames);
             this.invincible = this._invFrames > 0;
+        }
+
+        if (this.data.key === 'super_perfect_cell' && key === 'side_special') {
+            this._teleportBehindNearestEnemy();
         }
 
         // Up-B velocity boost (skip Sahur chargeable side-special lunge until release)
@@ -575,10 +664,41 @@ class Fighter {
         return null;
     }
 
+    _teleportBehindNearestEnemy() {
+        const fighters = this._arenaFighters || [];
+        let target = null;
+        let bestDist = Infinity;
+        for (const f of fighters) {
+            if (!f || f === this || !f.isAlive) continue;
+            if (this.team >= 0 && f.team >= 0 && f.team === this.team) continue;
+            const dx = (f.x + f.width / 2) - (this.x + this.width / 2);
+            const dy = (f.y + f.height / 2) - (this.y + this.height / 2);
+            const dist = dx * dx + dy * dy;
+            if (dist < bestDist) {
+                bestDist = dist;
+                target = f;
+            }
+        }
+        if (!target) return;
+
+        const behindOffset = 12;
+        const behindX = target.facing === 1
+            ? target.x - this.width - behindOffset
+            : target.x + target.width + behindOffset;
+        this.x = behindX;
+        this.y = target.y;
+        this.vx = 0;
+        this.vy = 0;
+        this.facing = -target.facing;
+    }
+
     _startUltimate() {
+        const ult = this.data.ultimateAttack;
+        if (!ult || ult.disableUltimate) {
+            return null;
+        }
         this.ultimateMeter = 0;
         this._ultimateCooldown = S.ULT_COOLDOWN_SECONDS;
-        const ult = this.data.ultimateAttack;
         if (ult) {
             this.currentAttack = ult;
             this._atkPhase = 'startup';
@@ -717,6 +837,35 @@ class Fighter {
         if (p && p.catch) p.catch(() => {});
     }
 
+    _startUltraChargeLoopAudio() {
+        const a = this._ultraChargeLoopAudio;
+        if (!a) return;
+        if (!this._canPlaySfx()) {
+            this._stopUltraChargeLoopAudio();
+            return;
+        }
+        if (a.paused) {
+            const p = a.play();
+            if (p && p.catch) p.catch(() => {});
+        }
+    }
+
+    _stopUltraChargeLoopAudio() {
+        const a = this._ultraChargeLoopAudio;
+        if (!a) return;
+        a.pause();
+        a.currentTime = 0;
+    }
+
+    _playUltraChargeReleaseAudio() {
+        const a = this._ultraChargeReleaseAudio;
+        if (!a) return;
+        if (!this._canPlaySfx()) return;
+        a.currentTime = 0;
+        const p = a.play();
+        if (p && p.catch) p.catch(() => {});
+    }
+
     _tickAttack(inp, dt) {
         const tickDt = typeof dt === 'number' ? dt : 0;
         const isSahurSideCharge =
@@ -724,6 +873,14 @@ class Fighter {
             this.state === ST.SPECIAL &&
             this.currentAttack &&
             this.currentAttack === this.data.attacks['side_special'] &&
+            this._atkPhase === 'startup' &&
+            !!this.currentAttack.chargeable;
+
+        const isUltraChargeNeutral =
+            (this.data.key === 'ultra_lazer' || this.data.key === 'super_perfect_cell') &&
+            this.state === ST.SPECIAL &&
+            this.currentAttack &&
+            this.currentAttack === this.data.attacks['neutral_special'] &&
             this._atkPhase === 'startup' &&
             !!this.currentAttack.chargeable;
 
@@ -759,8 +916,56 @@ class Fighter {
                 this._stopSahurChargeLoopAudio();
                 this._playSahurSideReleaseAudio();
             }
+        } else if (isUltraChargeNeutral) {
+            const maxFrames = Math.max(1, this.currentAttack.maxChargeFrames || 120);
+            this._ultraChargeFrames = Math.min(maxFrames, this._ultraChargeFrames + 1);
+            this._ultraChargeRatio = this._ultraChargeFrames / maxFrames;
+
+            const holdingSpecial = !!(inp && (inp.specialHeld || inp.special));
+            if (holdingSpecial) {
+                this._startUltraChargeLoopAudio();
+                if (!this._ultraChargeSpriteActive && this.currentAttack.chargeSprite) {
+                    this._applyTempSprite(this.currentAttack.chargeSprite, 999, null);
+                    this._ultraChargeSpriteActive = true;
+                }
+            }
+
+            const shouldRelease = !holdingSpecial || this._ultraChargeFrames >= maxFrames;
+            if (shouldRelease) {
+                this._atkTimer = 0;
+                this._stopUltraChargeLoopAudio();
+                this._playUltraChargeReleaseAudio();
+                this._ultraChargeAttack = this.currentAttack;
+
+                const minDmg = (this.currentAttack.chargeDamageMin != null)
+                    ? this.currentAttack.chargeDamageMin
+                    : (this.currentAttack.projDamage || this.currentAttack.damage || 0);
+                const maxDmg = (this.currentAttack.chargeDamageMax != null)
+                    ? this.currentAttack.chargeDamageMax
+                    : minDmg;
+                this._ultraChargeDamage = minDmg + (maxDmg - minDmg) * this._ultraChargeRatio;
+
+                const minKB = this.currentAttack.chargeBaseKBMin;
+                const maxKB = this.currentAttack.chargeBaseKBMax;
+                if (minKB != null && maxKB != null) {
+                    this._ultraChargeBaseKB = minKB + (maxKB - minKB) * this._ultraChargeRatio;
+                } else {
+                    this._ultraChargeBaseKB = null;
+                }
+
+                const minSize = this.currentAttack.chargeSizeMin || 1;
+                const maxSize = this.currentAttack.chargeSizeMax || minSize;
+                this._ultraChargeSizeMult = minSize + (maxSize - minSize) * this._ultraChargeRatio;
+
+                if (this._ultraChargeSpriteActive) {
+                    this._tempSpriteTimer = 0;
+                    this._restoreTempSprite();
+                    this._ultraChargeSpriteActive = false;
+                }
+            }
         } else {
             this._stopSahurChargeLoopAudio();
+            this._stopUltraChargeLoopAudio();
             if (this._atkPhase === 'startup') {
                 if (this._delayHitSpriteTimer > 0) {
                     this._delayHitSpriteTimer = Math.max(0, this._delayHitSpriteTimer - tickDt * 1000);
@@ -869,6 +1074,18 @@ class Fighter {
         this._sahurChargeRatio = 0;
         this._sahurFullChargeFlash = 0;
         this._sahurFullChargeTriggered = false;
+        this._stopUltraChargeLoopAudio();
+        this._ultraChargeFrames = 0;
+        this._ultraChargeRatio = 0;
+        this._ultraChargeAttack = null;
+        this._ultraChargeDamage = null;
+        this._ultraChargeBaseKB = null;
+        this._ultraChargeSizeMult = 1;
+        if (this._ultraChargeSpriteActive) {
+            this._tempSpriteTimer = 0;
+            this._restoreTempSprite();
+            this._ultraChargeSpriteActive = false;
+        }
 
         if (this.state === ST.ULTIMATE) {
             this.state = this.grounded ? ST.IDLE : ST.AIRBORNE;
@@ -1154,6 +1371,12 @@ class Fighter {
     // ──────────────────────────────────────────────────────────────
     takeHit(hitbox, attackerFacing, isSpecialHit, isUltimateHit) {
         this._stopSahurChargeLoopAudio();
+        this._stopUltraChargeLoopAudio();
+        if (this._ultraChargeSpriteActive) {
+            this._tempSpriteTimer = 0;
+            this._restoreTempSprite();
+            this._ultraChargeSpriteActive = false;
+        }
 
         // Play hit + character-specific hurt SFX
         if (SMASH.SFX) SMASH.SFX.playHit(this.data.key);
@@ -1328,6 +1551,7 @@ class Fighter {
             this._releaseGrab();
         }
         this._stopSahurChargeLoopAudio();
+        this._stopUltraChargeLoopAudio();
         this.stocks--;
         if (this.stocks <= 0) { this.state = ST.DEAD; return; }
         this._respawn();
@@ -1373,6 +1597,15 @@ class Fighter {
         this._sahurChargeRatio = 0;
         this._sahurFullChargeFlash = 0;
         this._sahurFullChargeTriggered = false;
+        this._stopUltraChargeLoopAudio();
+        this._ultraChargeFrames = 0;
+        this._ultraChargeRatio = 0;
+        this._ultraChargeAttack = null;
+        this._ultraChargeDamage = null;
+        this._ultraChargeBaseKB = null;
+        this._ultraChargeSizeMult = 1;
+        this._ultraChargeSpriteActive = false;
+        this._chargedUltThisAttack = false;
         this._tempSpriteTimer = 0;
         this._pendingTempSpriteOnHit = null;
         this._restoreTempSprite();

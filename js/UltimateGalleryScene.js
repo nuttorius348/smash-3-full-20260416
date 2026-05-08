@@ -8,6 +8,13 @@
 (function () {
 const S = SMASH.Settings;
 
+function getSelectableKeys() {
+    if (SMASH.Unlocks && typeof SMASH.Unlocks.getSelectableCharacterKeys === 'function') {
+        return SMASH.Unlocks.getSelectableCharacterKeys();
+    }
+    return typeof SMASH.getCharacterKeys === 'function' ? SMASH.getCharacterKeys() : [];
+}
+
 class UltimateGalleryScene {
     constructor(canvas, onBack) {
         this.canvas  = canvas;
@@ -15,7 +22,7 @@ class UltimateGalleryScene {
         this.onBack  = onBack;   // callback to return to main menu
 
         // Load character data
-        const keys = SMASH.getCharacterKeys();
+        const keys = getSelectableKeys();
         this.characters = keys.map(key => {
             const r = SMASH.ROSTER[key];
             const fd = new SMASH.FighterData(key);

@@ -8,6 +8,13 @@
 (function () {
 const S = SMASH.Settings;
 
+function getSelectableKeys() {
+    if (SMASH.Unlocks && typeof SMASH.Unlocks.getSelectableCharacterKeys === 'function') {
+        return SMASH.Unlocks.getSelectableCharacterKeys();
+    }
+    return typeof SMASH.getCharacterKeys === 'function' ? SMASH.getCharacterKeys() : [];
+}
+
 // Snake draft order for 16 picks (0 = P1, 1 = P2)
 const DRAFT_ORDER = [0,1,1,0, 0,1,1,0, 0,1,1,0, 0,1,1,0];
 
@@ -31,7 +38,7 @@ class DraftScene {
         this._onBack = options.onBack || null;
 
         // All character keys
-        this._allKeys = SMASH.getCharacterKeys();
+        this._allKeys = getSelectableKeys();
 
         // Draft state
         this._available  = [...this._allKeys]; // pool

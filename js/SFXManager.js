@@ -14,6 +14,8 @@ const POOL_SIZE = 6;   // how many concurrent instances per sound
 /* ── Character-key → hurt sound file mapping ────────────────── */
 const HURT_SOUNDS = {
     brawler:   'assets/soundeffect_lazer_hurt.mp3',
+    ultra_lazer: 'assets/UltraLazer_soundeffect hurt.mp3',
+    super_perfect_cell: 'assets/SuperPerfectCell_soundeffect hurt.mp3',
     zoner:     'assets/soundeffect_slaveish_hurt.mp3',
     grappler:  'assets/soundeffect_frankie_hurt.mp3',
     netanyahu: 'assets/soundeffect_netanyahu.mp3',
@@ -67,6 +69,8 @@ const CHARACTER_SELECT_SOUNDS = {
     vaughan:   'assets/Vaughan_selected.mp3',
     sahur:     'assets/Sahur_selected.mp3',
     omni_man:  'assets/Omni Man_Selected.mp3',
+    ultra_lazer: 'assets/UltraLazer_selected.mp3',
+    super_perfect_cell: 'assets/SuperPerfectCell_selected.mp3',
 };
 
 const HIT_VOLUME  = 0.45;
