@@ -592,7 +592,9 @@ class Fighter {
             this._delayHitSpriteTimer = 0;
         }
 
-        if ((this.data.key === 'alfgar' || this.data.key === 'ultra_lazer') && key === 'down_special') {
+        if ((this.data.key === 'alfgar' || this.data.key === 'ultra_lazer' || this.data.key === 'cell' ||
+            this.data.key === 'cell_semi' || this.data.key === 'cell_perfect' ||
+            this.data.key === 'super_perfect_cell') && key === 'down_special') {
             this._alfgarBellyFlopRotate = true;
         }
 
@@ -681,7 +683,7 @@ class Fighter {
         }
         if (!target) return;
 
-        const behindOffset = 12;
+        const behindOffset = 8;
         const behindX = target.facing === 1
             ? target.x - this.width - behindOffset
             : target.x + target.width + behindOffset;
@@ -689,7 +691,7 @@ class Fighter {
         this.y = target.y;
         this.vx = 0;
         this.vy = 0;
-        this.facing = -target.facing;
+        this.facing = target.facing;
     }
 
     _startUltimate() {
